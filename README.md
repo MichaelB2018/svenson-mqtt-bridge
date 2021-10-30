@@ -234,6 +234,8 @@ But again, you do not need such a sync cable for this automation. This is just i
 
 
 ## 8 License
-Click [here](https://opensource.org/licenses/MIT) for more detail
+![Image of the license](https://i.creativecommons.org/l/by-nc-sa/4.0/88x31.png)
+
+[Attribution-NonCommercial-ShareAlike 4.0 International (CC BY-NC-SA 4.0)](https://creativecommons.org/licenses/by-nc-sa/4.0/)
 
 
