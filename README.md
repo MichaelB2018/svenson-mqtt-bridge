@@ -13,20 +13,20 @@ The Sven&Son bed I used to develop the integration is a Sven & Son Adjustable Be
 ![Control Box](documentation/pic_hjc9.jpg)
 
 2 points to note here:
-1. It is critical that your control box has a 6 pin RJ11 port looking like this: <br/>![RJ11](documentation/rj11.png)<br/> The port is likely labeled as "**Sync Cable**"
+1. It is critical that your control box has a 6 pin RJ11 port fit for a cable connector looking like this: <br/>![RJ11](documentation/rj11.png)<br/> The port is likely labeled as "**Sync Cable**"
 1. I have so far only been able to test it with my bed/control box. If your bed is using the same Richmat control box but from a different brand or a different model of Sven&Son, I'd be keen to hear from you if this is working.
 
 
 As of now, you have to build your own hardware. Here are the steps to do so, this should not take long and does not require specialized tools unless you choose to do so.
 1.) simply order any 6P6C Telephone line cord ([Order](https://www.ebay.com/itm/173978854169?hash=item2881f2a319:g:tUYAAOSwDNdV4Vwx)) and cut of one end of the cord. Then connect it to your Raspberry Pi 4 as follow:
 ![Wire Connection](documentation/Schematic.png)
-1. you can use any method you like to connect the cut end of the wire to the GPIO ports of the Raspberry Pi. I find Dupond connectors useful & neat [Order](https://www.ebay.com/itm/294249650607?hash=item4482a559af:g:X64AAOSwpHZg2nbv)
-1. if you prefer to use different GPIO ports on Raspberry Pi, you can do so, but need to update your config file later on to point to the correct ports.
+1. You can use any method you like to connect the cut end of the wire to the GPIO ports of the Raspberry Pi. I find Dupond connectors useful & neat [Order](https://www.ebay.com/itm/294249650607?hash=item4482a559af:g:X64AAOSwpHZg2nbv)
+1. If you prefer to use different GPIO ports on Raspberry Pi, you can do so, but need to update your config file later on to point to the correct ports.
 1. Now plug in the RJ12 connector to the Richmat Control box in the port labeled "Sync Cable":
-![Wire Connection](documentation/pic_hjc9.jpg)
+![Connection](documentation/pic_hjc9.jpg)
 1. It's entirely possible to leave the Raspberry Pi dangling or on the floor. I find it useful to mount it near USB ports of the bed, so I can power it from there. So I simply tugged it in below some cables:
-![Wire Connection](documentation/pic_install1.jpg)
-![Wire Connection](documentation/pic_install2.jpg)
+![Connection](documentation/pic_install1.jpg)
+![Connection](documentation/pic_install2.jpg)
 
 And you are done on the hardware!
 
@@ -206,7 +206,7 @@ Finally, you can set up Home Assistant's Lovelace GUI to control your bed from t
 
 ![LoveLace GUI](documentation/homeassistant.png)
 
-to set this up, use the following configuration text in your Lovelace Raw Configuration Editor.
+To set this up, use the following configuration text in your Lovelace Raw Configuration Editor.
 ```
  - type: entities
         entities:
