@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>%%NAME%%</title>
+    <link rel="stylesheet" href="bootstrap.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css" integrity="sha512-iBBXm8fW90+nuLcSKlbmrPcLa0OT92xO1BIsZ+ywDWZCvqsWgccV3gFoRBv0z+8dLJgyAHIhR35VZc2oM/gI1w==" crossorigin="anonymous" />
+    <link href="flipTimer.css" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+    <link rel="manifest" href="manifest.json">
+    <meta name="mobile-web-app-capable" content="yes">
+    <link rel="icon" sizes="192x192" href="ico_lg.png">    
+    <script src="jquery-3.6.0.min.js"></script>
+    <script src="jcanvas.min.js"></script>
+    <script src="bootstrap.bundle.min.js"></script>
+    <script src="jquery.flipTimer.js"></script>
+    <script type="text/javascript"> 
+        var pathname = window.location.href.split("/")[0].split("?")[0];
+        var baseurl = pathname.concat("cmd/");
+        // var actionName = undefined;
+        
+        function getStatus() {
+           $.ajax({
+                 url: baseurl.concat("status"),
+                 dataType: "json", 
+                 timeout: 2000, 
+                 error: function(xhr, ajaxOptions, thrownError) {
+                    console.log("Failed to receive AJAX response in time. Ignore and wait for next one");
+                    // alert('Error: '+xhr.status+' - '+thrownError);
+                 },
+                 success: function(result){
+                    var $myCanvas = $("#currentPosition");
+
+                    $myCanvas.clearCanvas({x: 0, y: 0, width: 450, height: 200})
+                    
+                    
+                    tiltY = 10*Math.sin((result["tiltPercent"]+result["headPercent"])/100*45 * Math.PI / 180)
+                    tiltX = 10*Math.cos((result["tiltPercent"]+result["headPercent"])/100*45 * Math.PI / 180)
+                    headY = 35*Math.sin(result["headPercent"]/100*45 * Math.PI / 180)
+                    headX = 35*Math.cos(result["headPercent"]/100*45 * Math.PI / 180)
+                    feetY = 20*Math.sin(result["feetPercent"]/100*45 * Math.PI / 180)
+                    feetX = 20*Math.cos(result["feetPercent"]/100*45 * Math.PI / 180)
+                    circleX = 20*Math.sin(result["headPercent"]/100*45 * Math.PI / 180)
+                    circleY = 20*Math.cos(result["headPercent"]/100*45 * Math.PI / 180)
+
+
+                    $myCanvas.drawLine({
+                        strokeStyle: '#fffeff',
+                        strokeWidth: 10,
+                        rounded: true,
+                        closed: false,
+                        x1: 75-headX-tiltX, y1: 80-headY-tiltY,
+                        x2: 75-headX, y2: 80-headY,
+                        x3: 75, y3: 80,
+                        x4: 130, y4: 80,
+                        x5: 130+feetX, y5: 80-feetY,
+                        x6: 180+feetX, y6: 80-feetY
+                    });
+             
+                    $myCanvas.drawArc({
+                        strokeStyle: '#fffeff',
+                        fillStyle: '#fffeff',
+                        strokeWidth: 1,
+                        x: 75-headX+circleX-(tiltX-10), y: 80-headY-circleY,
+                        radius: 10
+                    });
+
+                    $myCanvas.clearCanvas({x: 0, y: 100, width: 450, height: 20})
+                    
+                    $myCanvas.drawText({
+                        text: result["tiltPercent"]+'%',
+                        fontFamily: 'Arial',
+                        fontSize: 12,
+                        x: 35, y: 100,
+                        fillStyle: '#fffeff',
+                    });
+
+                    $myCanvas.drawText({
+                        text: result["headPercent"]+'%',
+                        fontFamily: 'Arial',
+                        fontSize: 12,
+                        x: 70, y: 100,
+                        fillStyle: '#fffeff',
+                    });
+
+                    $myCanvas.drawText({
+                        text: result["feetPercent"]+'%',
+                        fontFamily: 'Arial',
+                        fontSize: 12,
+                        x: 175, y: 100,
+                        fillStyle: '#fffeff',
+                    });
+                 }
+           });
+           return;
+        }
+
+        function sendMessage(action) {   
+           $.ajax({
+                 url  :  baseurl.concat(action),
+                 type : 'GET',
+                 beforeSend: function() {
+                 },
+                 error: function(xhr, ajaxOptions, thrownError) {
+                    alert('Error: '+xhr.status+' - '+thrownError);
+                 },
+                 'success' : function(result) {
+                    if (result == "success") {
+                         // alert('request sent!');
+                    }
+                 }
+           });
+        }
+
+
+        // document.ready function
+        $(function() {
+           // selector has to be . for a class name and # for an ID
+           $('.press').click(function(e) {
+              e.preventDefault(); // prevent form from reloading page
+              sendMessage($(this).attr("actionName"));
+           });
+           $('.hold').on("touchstart mousedown", function(e) {
+              e.preventDefault(); // prevent form from reloading page
+              sendMessage($(this).attr("actionName"))
+           }).on("touchend mouseup",function(){
+              sendMessage("cancelHold")
+           })
+
+           $("#resetAll").on("click", function(){
+               console.log("COINFIRMATION DIALOG")
+               $("#resetConfirm").modal('show');
+           });
+
+           $("#resetConfirmYes").on("click", function(){
+               $("#resetConfirm").modal('hide');
+               var secs = 505
+               var t = new Date();
+               t.setSeconds(t.getSeconds() + secs);
+               $('#resetModal').modal("show");
+               sendMessage("reset");
+               $('.flipTimer').flipTimer({ direction: 'down', date: t});
+               setTimeout(() => {  $('#resetModal').modal("hide"); }, secs*1000);
+           });
+  
+           $("#resetConfirmNo,#resetConfirmClose").on("click", function(){
+              $("#resetConfirm").modal('hide');
+           });
+
+           $("#closeBrowser").on("click", function(){
+              window.close();
+           });
+        }); 
+         
+        $("html").on('show.bs.dropdown', function (e) {
+            getStatus()
+            statusTimer = setInterval(getStatus, 1000);
+         
+            var $myCanvas = $("#currentPosition");
+            
+        });
+        
+        $("html").on('hide.bs.dropdown', function () {
+            clearInterval(statusTimer)
+            var $myCanvas = $("#currentPosition")
+            $myCanvas.clearCanvas()
+        });
+        
+        
+</script>    
+</head>
+
+<body class="bg-dark">
+    <!--container-->
+    <div class="container m-0 p-0 shadow justify-content-between">
+        <div class="d-flex flex-row navbar justify-content-between px-3 py-4 align-items-center">
+            <i class="fas fa-chevron-left" id="closeBrowser"></i>
+            <span>%%NAME%%</span>
+            <i class="fas fa-ellipsis-h" data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="false" style="font-size:1.3em" id="settingsDropdown"></i>
+	    <div style="left: 108px; top: 52px" class="dropdown-menu dropdown-menu-right">
+	        <div>
+	            <canvas id="currentPosition" width="225" height="110">
+	                <p>This is fallback content for users of assistive technologies or of browsers that don't have full support for the Canvas API.</p>
+                    </canvas>
+	        </div>
+                <div class="dropdown-divider"></div>
+		<div class="dropdown-item press" actionName="storeM1">Store M1</div>
+		<div class="dropdown-item press" actionName="storeM2">Store M2</div>
+		<div class="dropdown-item press" actionName="storeTV">Store TV</div>
+		<div class="dropdown-item press" actionName="storeZeroG">Store ZeroG</div>
+		<div class="dropdown-item press" actionName="storeAntiSnore">Store AntiSnore</div>
+                <div class="dropdown-divider"></div>
+		<div class="dropdown-item" id="resetAll">Reset All</div>
+	    </div>
+        </div>
+		
+	<div class="d-flex flex-row justify-content-between px-3 justify-content-center align-items-center">
+            <div class="d-flex flex-row p-2 grey-bg buttoneffect press" actionName="M1">
+                <span class="label px-2 py-1"><h5>M1</h5></span>
+            </div>
+	    <div class="d-flex flex-row p-2 grey-bg justify-content-center align-items-center">
+                <i class="fas icon-torch px-3 py-1 control-icon" style="font-size:2em"></i>
+            </div>
+            <div class="d-flex flex-row p-2 grey-bg justify-content-center align-items-center buttoneffect press" actionName="M2">
+                <span class="label px-2 py-1"><h5>M2</h5></span>
+	    </div>
+        </div>
+		
+	<div class="d-flex flex-row justify-content-between pt-1 px-3 " style="height:60px">
+            <div class="d-flex flex-row py-0 px-3 my-1 grey-bg-square justify-content-center align-items-center w-25 buttoneffect press" actionName="TV">
+                <span class="label p-2"><h6>TV</h6></span>
+            </div>
+            <div class="d-flex flex-column flex-row py-2 px-3 my-1 grey-bg-square justify-content-center align-items-center w-25 buttoneffect hold" actionName="tiltUp"> 
+                <i class="fas icon-tiltup control-icon" style="font-size:.8em"></i>
+                <span class="label px-3">TILT</span>
+            </div>
+            <div class="d-flex flex-row py-0 px-3 my-1 grey-bg-square justify-content-center align-items-center w-25 buttoneffect press" actionName="zeroG">
+                <span class="label p-2"><h6>Zero&nbsp;G</h6></span>
+            </div>
+        </div>
+		
+	<div class="d-flex flex-row justify-content-between pt-1 px-3" style="height:60px">
+            <div class="d-flex flex-row py-0 px-3 my-1 grey-bg-square justify-content-center align-items-center w-25 buttoneffect press" actionName="antiSnore">
+                <span class="label p-2"><h6><center>Anti<br>Snore</center></h6></span>
+            </div>
+	    <div class="d-flex flex-column flex-row py-2 px-3 my-1 grey-bg-square justify-content-center align-items-center w-25 buttoneffect hold" actionName="tiltDown">
+                <i class="fas icon-tiltdown control-icon" style="font-size:.8em"></i>
+		<span class="label px-3">TILT</span>
+            </div>
+            <div class="d-flex flex-row py-0 px-3 my-1 grey-bg-square justify-content-center align-items-center w-25 buttoneffect press" actionName="light">
+                <i class="fas icon-light py-3 control-icon" style="font-size:.9em"></i>
+	    </div>
+        </div>
+ 
+        <div class="d-flex flex-row mt-1 mx-1 justify-content-between px-2">
+            <div class="d-flex flex-column rounded-bg py-1 px-2 justify-content-center align-items-center w-25">
+                <i class="fas fa-chevron-up py-3 control-icon buttoneffect hold" actionName="headUp"></i>
+		<i class="fas icon-head fa-3x py-3 control-icon" style="font-size:1em"></i>
+                <span class="label py-2">HEAD</span>
+                <i class="fas fa-chevron-down py-3 control-icon buttoneffect hold" actionName="headDown"></i>
+            </div>
+            <div class="py-5 d-flex flex-column align-items-center">
+                <div class="d-flex flex-row flat-round justify-content-center align-items-center buttoneffect press" actionName="flat">
+                    <span class="label"><h5>FLAT</h5></span>
+                </div>
+                
+            </div>
+            <div class="d-flex flex-column rounded-bg py-1 px-2 justify-content-center align-items-center w-25">
+                <i class="fas fa-chevron-up py-3 control-icon buttoneffect hold" actionName="feetUp"></i>
+		    <i class="fas icon-foot fa-3x py-3 control-icon" style="font-size:.8em"></i>
+                <span class="label py-2">FOOT</span>
+                <i class="fas fa-chevron-down py-3 control-icon buttoneffect hold" actionName="feetDown"></i>
+            </div>
+        </div>
+
+        <div class="d-flex flex-row mt-1 mx-1 py-2 justify-content-between px-2">
+            <div class="d-flex flex-column rounded-bg py-0 px-2 justify-content-center align-items-center w-25 buttoneffect press" actionName="massageHead">
+                <i class="fas icon-headmassage p-3 control-icon" style="font-size:2.5em"></i>
+		<span class="label py-2">HEAD</span>
+            </div>
+		<div class="d-flex flex-column align-items-center py-0 px-2 w-25">
+    		    <div class="d-flex flex-column py-0 px-3 my-1 w-100 justify-content-center justify-content-middle align-items-center grey-bg-square buttoneffect press" actionName="massageMode">
+			<span class="label">MODE</span>
+			<i class="fas icon-massage p-2 control-icon" style="font-size:.8em"></i>
+		    </div>
+				
+                    <div class="d-flex flex-column py-0 px-3 my-1 w-100 justify-content-center justify-content-middle align-items-center grey-bg-square buttoneffect press" actionName="massageOnOff">
+			<span class="label">ON/OFF</span>
+			<i class="fas icon-massage p-2 control-icon" style="font-size:.8em"></i>
+		    </div>
+            </div>
+            <div class="d-flex flex-column rounded-bg py-0 px-2 justify-content-center align-items-center w-25 buttoneffect press" actionName="massageFeet"> 
+                <i class="fas icon-footmassage p-3 control-icon" style="font-size:2.5em"></i>
+		<span class="label py-2">FOOT</span>
+            </div>
+        </div>
+    </div>
+    
+<div class="modal fade" id="resetModal" tabindex="-1" style="padding-right: 0px !important; overflow-y: hidden !important;">
+  <div class="modal-dialog h-100 d-flex flex-row justify-content-center align-items-center">
+    <div class="flipTimer">
+      <div class="minutes"></div>
+      <div class="seconds"></div>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" tabindex="-1" role="dialog" aria-labelledby="mySmallModalLabel" aria-hidden="true" id="resetConfirm">
+  <div class="modal-dialog modal-lg modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h4 class="modal-title" id="myModalLabel">Confirm</h4>
+        <button type="button" class="btn p-0" data-dismiss="modal" aria-label="Close">
+          <span aria-hidden="true" style="font-size:2em" id="resetConfirmClose">&times;</span>
+        </button>
+      </div>
+      <div class="modal-body">
+      Be aware that this will reset all pre-stored settings to their default
+      value. This will also reset the positions for M1 & M2. Note that his
+      action will take about 10 minutes.<br> <br> Are you sure you want to
+      proceed?
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-default" id="resetConfirmYes">Yes</button>
+        <button type="button" class="btn btn-primary" id="resetConfirmNo">No</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

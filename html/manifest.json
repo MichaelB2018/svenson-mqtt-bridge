@@ -1,0 +1,32 @@
+{
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "addon@example.com",
+      "strict_min_version": "1.0"
+    }
+  },
+  
+  "background_color": "#212529",
+
+  "background": {
+    "scripts": ["jquery-3.6.0.min.js"]
+  },
+
+  "default_locale": "en",
+
+  "description": "Operate Bed",
+
+  "icons": {
+    "180": "ico_lg.png"
+  },
+
+  "manifest_version": 1,
+
+  "name": "Sven&Son Bed",
+
+  "permissions": ["webNavigation"],
+
+  "version": "0.1",
+
+  "web_accessible_resources": ["ico_lg.png"]
+}
