@@ -8,23 +8,23 @@ This project allows to operate a [Sven&Son](https://svenandson.com/) smart bed f
 
 This project has been developed and tested with a Raspberry Pi 4 as the base platforms. Since the serial port and network are the only external ports used, the program could be used on other platforms with minor modifications and testing. It needs to be linked to the bed using a connection cable (see below).
 
-The Sven&Son bed I used to develop the integration is a Sven & Son Adjustable Bed Base, Classic+ Series [Order from Amazon](https://www.amazon.com/gp/product/B07LGFJGQ4/ref=ppx_yo_dt_b_search_asin_title?ie=UTF8&psc=1). The bed does not come with Bluetooth or any Android/iPhone integration. But in all likelihood, this should work with any Sven&Son bed in the Essentials, Classic, Bliss & Platinum Series. The key point here is the control hardware the bed is using. This integration is made for the Qingdao [Richmat](http://richmat-us.com/product.aspx?BaseInfoCateId=87&CateId=87) HJC9 control box. So if you bed uses the control box (located below the bed) that looks like the below picture, this automation will likely work:
+The Sven&Son bed I used to develop the integration is a Sven & Son Adjustable Bed Base, Classic+ Series ([Order from Amazon](https://www.amazon.com/gp/product/B07LGFJGQ4/ref=ppx_yo_dt_b_search_asin_title?ie=UTF8&psc=1)). The bed does not come with Bluetooth or any Android/iPhone integration. But in all likelihood, this should work with any Sven&Son bed in the Essentials, Classic, Bliss & Platinum Series. The key point here is the control hardware the bed is using. This integration is made for the [Qingdao Richmat](http://richmat-us.com/product.aspx?BaseInfoCateId=87&CateId=87) HJC9 control box. So if you bed uses the control box (located below the bed) that looks like the below picture, this automation will likely work:
 
 ![Control Box](documentation/pic_hjc9.jpg)
 
 2 points to note here:
-1. It is critical that your control box has a 6 pin RJ11 port looking like this: ![RJ11](documentation/rj11.png). The port it likely labels as "Sync"
+1. It is critical that your control box has a 6 pin RJ11 port looking like this: <br/>![RJ11](documentation/rj11.png)<br/> The port is likely labeled as "**Sync Cable**"
 1. I have so far only been able to test it with my bed/control box. If your bed is using the same Richmat control box but from a different brand or a different model of Sven&Son, I'd be keen to hear from you if this is working.
 
 
 As of now, you have to build your own hardware. Here are the steps to do so, this should not take long and does not require specialized tools unless you choose to do so.
-1.) simply order any 6P6C Telephone line cord [Order](https://www.ebay.com/itm/173978854169?hash=item2881f2a319:g:tUYAAOSwDNdV4Vwx) and cut of one end of the cord. Then connect it to your Raspberry Pi 4 as follow:
+1.) simply order any 6P6C Telephone line cord ([Order](https://www.ebay.com/itm/173978854169?hash=item2881f2a319:g:tUYAAOSwDNdV4Vwx)) and cut of one end of the cord. Then connect it to your Raspberry Pi 4 as follow:
 ![Wire Connection](documentation/Schematic.png)
 1. you can use any method you like to connect the cut end of the wire to the GPIO ports of the Raspberry Pi. I find Dupond connectors useful & neat [Order](https://www.ebay.com/itm/294249650607?hash=item4482a559af:g:X64AAOSwpHZg2nbv)
 1. if you prefer to use different GPIO ports on Raspberry Pi, you can do so, but need to update your config file later on to point to the correct ports.
-1. Now plug in the RJ12 connector to the Richmat Control box:
+1. Now plug in the RJ12 connector to the Richmat Control box in the port labeled "Sync Cable":
 ![Wire Connection](documentation/pic_hjc9.jpg)
-1. It's entirely possible to leave the Raspberry Pi dangling or on the floor. I find it useful to mount it near USB ports of the bed, so I can power it from there:
+1. It's entirely possible to leave the Raspberry Pi dangling or on the floor. I find it useful to mount it near USB ports of the bed, so I can power it from there. So I simply tugged it in below some cables:
 ![Wire Connection](documentation/pic_install1.jpg)
 ![Wire Connection](documentation/pic_install2.jpg)
 
@@ -137,11 +137,13 @@ The Web interface resembles the physical remote control and operation is straigh
 
 ![Wire Connection](documentation/WebRemote.png)
 
-Note that the 3 dots on the top right hand side help to program the bed:
+The 3 dots on the top right hand side help to program the bed:
 
 ![Wire Connection](documentation/WebRemoteProgram.png)
 
 The first 5 options allow you to store the current position of the bed. the 6th option ("Reset All") helps to reset all the stored position to the factory default. Note that "Reset All" will take about 10 minutes and requires to raise and lower your bed to the various positions. So only operate the "Reset All" if you are not in bed!
+
+Final note here is for users of Android or iPohe devices. You can select "Add To Home" screen (or similar) from your browser of your smart phone. This will allow you to access your bed's remote directly from the home screen of your device.
 
 ## 6 MQTT Integration (e.g. for Home Assistant)
 
@@ -226,12 +228,12 @@ Note again that the term **my_bed** will be adjusted if you choose a different n
 ## 7 Additional Information
 The Sync port is obviously made to connect 2 beds (likely a Split King) to ensure that the beds move in sync. However this is not documented n the manual and repeated calls to the vendor to sell me a split cable went unanswered. So if you are just interested in a sync cable, you can make this yourself using cheap RJ12 P6C6 connectors  [Order](https://www.ebay.com/itm/393536559928?epid=1707509278&hash=item5ba09b5b38:g:su0AAOSwlRNhKXGU) and a 6 Conductor Flat Modular Line Cord [Order](https://www.showmecables.com/89-350-193-bk?gclid=CjwKCAjw2vOLBhBPEiwAjEeK9solxEAq65zqyEKRCsE6wkvLs0uS2bMHigPTeO7wp67jKc09wo9gYxoC-gsQAvD_BwE). I find it easier & cheaper to order a normal Telephone Line Cable [Order](https://www.ebay.com/itm/400973901474?epid=1839933136&hash=item5d5be82ea2:g:7y4AAOSwDNdVxQAs)  and to replace one end of the connector. Note that the wiring needs to match the below for the sync cable to work:
 
-![Sync Cable](documentation/Sync Cable.png)
+![Sync Cable](documentation/Sync%20Cable.png)
 
 But again, you do not need such a sync cable for this automation. This is just if you are looking to sync 2 beds without automation.
 
 
 ## 8 License
-![Image of the license](https://opensource.org/licenses/MIT)
+(license)(https://opensource.org/licenses/MIT)
 
 
