@@ -619,9 +619,12 @@ def receiveMessageFromMQTT(client, userdata, message):
         type = topic.split("/")[3]
         position = 0
         if type == "command":
-            device_id = topic.split("/")[4].split("_")[0]
+            device_id = ''.join(filter(str.isalnum, config["name"]))
+            rcvd_device_id = topic.split("/")[4].split("_")[0]
             command = topic.split("/")[4].split("_")[1]
-            if (command == "preset"):
+            if (device_id != rcvd_device_id):
+                pass;  ## Not for me!
+            elif (command == "preset"):
                 command = msg  ## This works correct for M1, M2 & TV
                 if (msg == "Zero G"):
                   command="zeroG"
@@ -658,7 +661,7 @@ def receiveMessageFromMQTT(client, userdata, message):
                     svensonState["massageFeet"] = int(msg.split(" ")[1])-1
             
             try:
-                if command in cmdTypes.keys():
+                if (device_id != rcvd_device_id) and (command in cmdTypes.keys()):
                     logger.info("processing Command \"" + command + "\"")
                     if (svensonContinuous["active"] == True):
                         if (svensonContinuous["cmd"] == command):
