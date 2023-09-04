@@ -20,7 +20,7 @@
 #
 
 
-import re, requests, sys, os, logging, socket, time
+import re, requests, sys, os, logging, socket, time, uuid
 import json, time, threading, argparse
 import paho.mqtt.client as paho
 import difflib
@@ -52,6 +52,11 @@ uartLock = threading.Lock()
 lightTimer = threading.Timer(300, None)
 webapp = Flask(import_name="WebServer", static_url_path="", static_folder=curr_path+'/html')
 mqttState = svensonState.copy()
+
+def get_mac_address():
+    mac = ''.join(['{:02x}'.format((uuid.getnode() >> (8 * i)) & 0xff)
+                   for i in reversed(range(6))])
+    return mac.lower()
 
 def startPIGPIO():
    if sys.version_info[0] < 3:
@@ -924,7 +929,7 @@ if __name__ == '__main__':
     # And connect to MQTT
     if config["MQTT_Server"] and config["MQTT_Server"].strip():
         logger.info("Connecting to MQ....")
-        t = paho.Client(client_id="svenson-mqtt-bridge")                           #create client object
+        t = paho.Client(client_id="svenson-mqtt-bridge_"+get_mac_address())                           #create client object
         t.username_pw_set(username=config["MQTT_User"],password=config["MQTT_Password"])
         t.on_connect = on_connect
         t.on_message=receiveMessageFromMQTT
