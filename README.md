@@ -110,7 +110,7 @@ sudo python3 /home/pi/svenson-mqtt-bridge/svenson-mqtt-bridge.py
 
 You can also automatically start the software when your Raspberry Pi starts
 ```sh
-sudo crontab –e
+sudo crontab -e
 ```
 Note, that "crontab -e" will just open a console-based text editor that you can edit the crontab script. The first time you run "crontab -e" you will be prompted to choose the editor. I recommend nano. From the crontab window, add the following to the bottom of the crontab script
 
