@@ -661,7 +661,7 @@ def receiveMessageFromMQTT(client, userdata, message):
                     svensonState["massageFeet"] = int(msg.split(" ")[1])-1
             
             try:
-                if (device_id != rcvd_device_id) and (command in cmdTypes.keys()):
+                if (device_id == rcvd_device_id) and (command in cmdTypes.keys()):
                     logger.info("processing Command \"" + command + "\"")
                     if (svensonContinuous["active"] == True):
                         if (svensonContinuous["cmd"] == command):
