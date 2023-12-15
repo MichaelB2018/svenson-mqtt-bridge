@@ -451,6 +451,11 @@ def processMessageFromSvenson(msg):
            lightTimer.start()
        else:
            lightTimer.cancel()
+    elif (msg[1] in [0x0b]):
+       svensonState["head"]   = 10000
+       svensonState["feet"]   = 10000
+       svensonState["tilt"]   = 10000
+       svensonState["lumbar"] = 10000
     elif (msg[1] in [0x36, 0x37]):
        svensonState["massageOnOff"] = cmdTypes["massageOnOff"].index(msg[1])
        if (svensonState["massageOnOff"] == 0):
