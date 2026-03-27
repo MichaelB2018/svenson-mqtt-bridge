@@ -1,0 +1,16 @@
+{
+  "name": "Sven&Son Bed",
+  "short_name": "Bed Control",
+  "description": "Operate Bed",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#212529",
+  "theme_color": "#212529",
+  "icons": [
+    {
+      "src": "ico_lg.png",
+      "sizes": "180x180",
+      "type": "image/png"
+    }
+  ]
+}

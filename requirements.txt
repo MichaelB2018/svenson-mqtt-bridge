@@ -1,0 +1,8 @@
+paho-mqtt
+requests
+flask
+tendo
+pigpio
+
+# Optional: only required if UseHttps = True in your config
+pyopenssl
