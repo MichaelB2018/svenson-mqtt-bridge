@@ -1,240 +1,214 @@
-# Sven & Son Automation
+# Sven & Son MQTT Bridge
 
-## 1 Overview
+Control your [Sven & Son](https://svenandson.com/) adjustable bed from a Raspberry Pi — with a web remote, MQTT, and Home Assistant integration.
 
-This project allows to operate a [Sven&Son](https://svenandson.com/) smart bed from a Raspberry Pi with cheap hardware costing less than a few dollars. It comes with a Web Interface that allows the control of the bed without the traditional remote control from any Web Browser or Smart Phone It also offers an MQTT interface with discovery to [Home Assistant](https://www.home-assistant.io/), so that one can integrate the various functions of the bed with Smart Home Control. This allows for turning the bed lights on based on other events such as light switches in the room. It also allows to raise and lower the bed either based on a given automation event or via Amazon Alexa if the latter is linked to Home Assistant. Finally, it allows the massage feature to be turned on automatically based on Amazon Alexa or other alarms (if linked to Home Assistant), which is an excellent way to wake up
+## Overview
 
-## 2 Hardware
+This project lets you operate a Sven & Son smart bed from a Raspberry Pi using inexpensive hardware (a few dollars at most). It provides:
 
-This project has been developed and tested with a Raspberry Pi 4 as the base platforms. Since the serial port and network are the only external ports used, the program could be used on other platforms with minor modifications and testing. It needs to be linked to the bed using a connection cable (see below).
+- **Web Interface** — control the bed from any browser or smartphone, no physical remote needed.
+- **MQTT Integration** — publish and subscribe to bed commands via an MQTT broker.
+- **Home Assistant Discovery** — auto-discovered entities for head, feet, tilt, light, massage, and preset positions.
 
-The Sven&Son bed I used to develop the integration is a Sven & Son Adjustable Bed Base, Classic+ Series ([Order from Amazon](https://www.amazon.com/gp/product/B07LGFJGQ4)). The bed does not come with Bluetooth or any Android/iPhone integration. But in all likelihood, this should work with any Sven & Son bed in the Essentials, Classic, Bliss & Platinum Series. The key point here is the control hardware the bed is using. This integration is made for the [Qingdao Richmat](http://richmat-us.com/product.aspx?BaseInfoCateId=87&CateId=87) HJC9 control box. So if your bed uses the control box (located below the bed) that looks like the below picture, this automation will likely work:
+With Home Assistant, you can turn bed lights on from a light switch, raise or lower the bed via automation or Alexa, and even start the massage feature as a wake-up alarm.
+
+## Hardware
+
+### Compatibility
+
+This project has been developed and tested on a **Raspberry Pi Zero W** and **Raspberry Pi 4**. Since only the serial port and network are used, it could run on other platforms with minor modifications.
+
+The integration is built for the [Qingdao Richmat](http://richmat-us.com/product.aspx?BaseInfoCateId=87&CateId=87) **HJC9 control box**. It was developed with the Sven & Son Adjustable Bed Base, Classic+ Series ([Amazon](https://www.amazon.com/gp/product/B07LGFJGQ4)), but should work with any Sven & Son bed in the Essentials, Classic, Bliss, or Platinum Series — or any bed using this control box:
 
 ![Control Box](documentation/pic_hjc9.jpg)
 
-2 points to note here:
-1. It is critical that your control box has a 6 pin RJ11 port fit for a cable connector looking like this: <br/>![RJ11](documentation/rj11.png)<br/> The port is likely labeled as "**Sync Cable**"
-1. I have so far only been able to test it with my bed/control box. If your bed is using the same Richmat control box but from a different brand or a different model of Sven&Son, I'd be keen to hear from you if this is working.
+**Important:**
+1. Your control box must have a **6-pin RJ11 port** (likely labeled "**Sync Cable**"):<br/>![RJ11](documentation/rj11.png)
+2. This has only been tested on one bed/control box so far. If yours uses the same Richmat HJC9 box (same brand or different), I'd love to hear whether it works for you.
 
+### Wiring
 
-As of now, you have to build your own hardware. Here are the steps to do so, this should not take long and does not require specialized tools unless you choose to do so.
-1.) Simply order any 6P6C Telephone line cord ([Order](https://www.ebay.com/itm/173978854169?hash=item2881f2a319:g:tUYAAOSwDNdV4Vwx)) and cut off one end of the cord. Then connect it to your Raspberry Pi 4 as follow:
-![Wire Connection](documentation/Schematic.png)
-1. You can use any method you like to connect the cut end of the wire to the GPIO ports of the Raspberry Pi. I find Dupond connectors useful & neat [Order](https://www.ebay.com/itm/294249650607?hash=item4482a559af:g:X64AAOSwpHZg2nbv)
-1. If you prefer to use different GPIO ports on Raspberry Pi, you can do so, but need to update your config file later on to point to the correct ports.
-1. Now plug in the RJ12 connector to the Richmat Control box in the port labeled "Sync Cable":
-![Connection](documentation/pic_hjc9.jpg)
-1. It's entirely possible to leave the Raspberry Pi dangling or on the floor. I find it useful to mount it near USB ports of the bed, so I can power it from there. So I simply tugged it in below some cables:
-![Connection](documentation/pic_install1.jpg)
-![Connection](documentation/pic_install2.jpg)
+1. Order a 6P6C telephone line cord ([example](https://www.ebay.com/itm/173978854169)) and cut off one end.
+2. Connect the wires to your Raspberry Pi GPIO as shown:<br/>![Wire Connection](documentation/Schematic.png)
+3. You can use DuPont connectors ([example](https://www.ebay.com/itm/294249650607)) or any method you prefer. If you use different GPIO pins, update the config file accordingly.
+4. Plug the RJ12 connector into the "Sync Cable" port on the Richmat control box:<br/>![Connection](documentation/pic_hjc9.jpg)
+5. Mount the Pi wherever is convenient — for example, tucked near the bed's USB ports for power:<br/>![Installation](documentation/pic_install1.jpg)<br/>![Installation](documentation/pic_install2.jpg)
 
-And you are done on the hardware!
+## Software Installation
 
-## 3 Software
+A basic familiarity with the Linux command line and SSH is assumed. If you are new to Raspberry Pi, the [official documentation](https://www.raspberrypi.com/documentation/) is a great starting point.
 
-If you are new to using a Raspberry Pi and Linux please refer to other sources for coming up to speed with the environment. Having a base knowledge will go a long way. This [site](https://www.raspberrypi.org/help/) is a great place to start if you are new to these topics.
+### 1. Clone the Repository
 
-If you are not familiar with remote login commands for Linux/Unix, two useful commands if you are not using a GUI on your raspberry pi are "ssh" and "scp". These commands allow you to run your Pi without a monitor or user interface. These programs allow you to remotely login to your Pi and remotely transfer files to your Pi. This [page](https://linuxacademy.com/blog/linux/ssh-and-scp-howto-tips-tricks/) describes both programs. You can also do a web search on these programs to find other resources on their use. In short you need to have at minimum a basic understanding of using a command line, preferably some experience with Linux and the ability to transfer files to a Raspberry Pi and execute them.
-
-The Raspberry Pi organization has documentation on installing an operating system on your Raspberry Pi. It is located [here](https://www.raspberrypi.org/documentation/installation/installing-images/README.md).
-
-Once the Pi has its basic setup (an operating system and an internet connection) working, ssh into your Raspberry Pi and you should find that you are in the directory /home/pi. Note: if you prefer not to use a headless system, you can also open a terminal windows directly on the Pi.
-
-The next step is to download the Sven&Son Software from the Github repository to your Raspberry Pi. The easiest way to do this is to use the "git" program. Most Raspberry Pi distributions include the git program (except Debian Lite).
-
-Whether or not it is already installed, it's good practice to type the following:
+SSH into your Raspberry Pi, then:
 
 ```sh
 sudo apt-get update
-sudo apt-get install git
-```
-(If git isn't installed, it will install it; if it was previously, it will update it)
-
-Once git is installed on your system, make sure you are in the /home/pi directory, then type:
-
-```sh
+sudo apt-get install git pigpio
 git clone https://github.com/MichaelB2018/svenson-mqtt-bridge.git
+cd svenson-mqtt-bridge
 ```
 
-The above command will make a directory in /home/pi named svenson-mqtt-bridge and put the project files in this directory.
-
-Next, we need to install Python Libraries. Before doing so, you have to decide whether you want to run the Sven&Son MQTT bridge in Python 2 or Python 3. The library supports both, but Python 3 is suggested. So, to proceed in Python 3, you need to ensure pip3 is installed:
-
-If the program 'pip3' is not installed on your system, type:
+### 2. Install Python Dependencies
 
 ```sh
-sudo apt-get update
-sudo apt-get install python3-pip
-```
-    
-If you decided to use Python 2, the last command will read instead:
-
-```sh
-sudo apt-get install python-pip
+sudo pip3 install -r requirements.txt
 ```
 
-Next, we need to install the PIGPIO libraries, to do so, type:
-
-```sh
-sudo apt-get install pigpio
-```
-
-Next install the required Python Libraries:
-
-```sh
-sudo pip3 install paho-mqtt tendo
-```
-   
-If you decided to use Python 2, the last command will read instead:
-
-```sh
-sudo pip install paho-mqtt tendo
-```
-
-Next, let's test if it all works. Start <svenson-mqtt-bridge.py> by typing:
+### 3. Test It
 
 ```sh
 sudo python3 /home/pi/svenson-mqtt-bridge/svenson-mqtt-bridge.py
 ```
 
-You should not see any error messages here.
+You should not see any error messages.
 
-## 4 Usage
+## Usage
 
-Note that the config file won't exists the first time you run the application. In that case, a new config file will be created based on the name you specified (e.g. /home/pi/svenson-mqtt-bridge/svenson-mqtt-bridge.conf). Once it has been created, you can modify it to change your need (SSL or not, which port is used, etc.), it will not be erased with an update. If you messed up something, just delete it and relaunch svenson-mqtt-bridge.py, a new vanilla copy will be generated.
+### Configuration
 
-The recommended operation mode is to start the software by typing:
+The first time you run the application, a config file (`svenson-mqtt-bridge.conf`) is created from the default template. Edit it to match your setup (SSL, port, MQTT broker, GPIO pins, etc.). The config file is never overwritten by updates — if you need a fresh copy, delete it and restart the application.
+
+### Running
+
+Start manually:
+
 ```sh
 sudo python3 /home/pi/svenson-mqtt-bridge/svenson-mqtt-bridge.py
-```    
+```
 
-You can also automatically start the software when your Raspberry Pi starts
+### Auto-Start on Boot
+
+Edit the root crontab:
+
 ```sh
 sudo crontab -e
 ```
-Note, that "crontab -e" will just open a console-based text editor that you can edit the crontab script. The first time you run "crontab -e" you will be prompted to choose the editor. I recommend nano. From the crontab window, add the following to the bottom of the crontab script
+
+Add the following lines:
 
 ```
-@reboot sleep 60;sudo /home/pi/svenson-mqtt-bridge/svenson-mqtt-bridge.py
+@reboot sleep 60; sudo /home/pi/svenson-mqtt-bridge/svenson-mqtt-bridge.py
 0 * * * * sudo /home/pi/svenson-mqtt-bridge/svenson-mqtt-bridge.py
 ```
 
-And save the crontab schedule. (if using nano type press ctrl-o to save the file, ctrl-x to exit nano). Now, every time your system is booted operateShutters will start.
+The first line starts the bridge 60 seconds after boot. The second restarts it hourly as a safety net (the program is not known to crash, so the second line is optional). Reboot your Pi after saving.
 
-The program is not known to crash. Hence restarting it every hour is not really required. But it does not hurt either. So up to you if you wish to use both of the above lines or just the first one. In any case, you will need to restart your Raspberry Pi once you have completed step 4. To do so, type "sudo reboot".
-
-To stop the program from running in the background, type:
+### Stopping
 
 ```sh
-sudo pkill –f svenson-mqtt-bridge.py
+sudo pkill -f svenson-mqtt-bridge.py
 ```
 
-## 5 Web GUI
+## Web Interface
 
-Using your web-browser, navigate to: http://IPaddressOfYouPi:80
+Navigate to `http://<your-pi-ip>:80` in any browser.
 
-The Web interface resembles the physical remote control and operation is straight forward. Note that the up and down need to be held for the adjustment to continue - just like on the physical remote.
+The web interface resembles the physical remote control — operation is straightforward. Hold the up/down buttons for continuous adjustment, just like the physical remote.
 
-![Wire Connection](documentation/WebRemote.png)
+![Web Remote](documentation/WebRemote.png)
 
-The 3 dots on the top right hand side help to program the bed:
+Tap the three dots in the top-right corner to access programming options:
 
-![Wire Connection](documentation/WebRemoteProgram.png)
+![Web Remote Programming](documentation/WebRemoteProgram.png)
 
-The first 5 options allow you to store the current position of the bed. the 6th option ("Reset All") helps to reset all the stored position to the factory default. Note that "Reset All" will take about 10 minutes and requires to raise and lower your bed to the various positions. So only operate the "Reset All" if you are not in bed!
+The first five options store the current bed position to a preset. The "Reset All" option recalibrates all stored positions to factory defaults — this takes about 10 minutes and moves the bed through its full range, so **do not use it while in bed**.
 
-Final note here is for users of Android or iPohe devices. You can select "Add To Home" screen (or similar) from your browser of your smart phone. This will allow you to access your bed's remote directly from the home screen of your device.
+> **Tip:** On Android or iPhone, use your browser's "Add to Home Screen" option to create an app-like shortcut to the bed remote.
 
-## 6 MQTT Integration (e.g. for Home Assistant)
+## MQTT Integration
 
-While the MQTT integration was written specifically for [Home Assistant](https://www.home-assistant.io/), nothing is stopping the use of this integration for other purposes. But more on this later
+While built specifically for [Home Assistant](https://www.home-assistant.io/), the MQTT interface works with any MQTT-based system.
 
-First, to use this integration, make sure you configure your `svenson-mqtt-bridge.conf` with the right parameters. Look out for the following lines:
+### Broker Setup
 
-```
+Configure the MQTT section in `svenson-mqtt-bridge.conf`:
+
+```ini
 MQTT_Server = 192.168.1.x
 MQTT_Port = 1883
-MQTT_User = xxxxxxx
-MQTT_Password = xxxxxxx
+MQTT_User = your_username
+MQTT_Password = your_password
 ```
-and make sure they match the setup of your MQTT Broker. If you are using Home Assistant, you can conveniently use the "Mosquitto broker" add-on inside Home Assistant. For more information refer to the relevant [Documentation](https://github.com/home-assistant/hassio-addons/tree/master/mosquitto)
 
-If you choose not to use the Home Assistant add-in, you can download the [Mosquitto Broker](https://mosquitto.org/) and refer to the [Broker configuration](https://mosquitto.org/man/mosquitto-8.html)
+These must match your MQTT broker settings. If you use Home Assistant, the [Mosquitto broker add-on](https://github.com/home-assistant/hassio-addons/tree/master/mosquitto) is a convenient option. Alternatively, you can install [Mosquitto](https://mosquitto.org/) standalone and refer to the [broker documentation](https://mosquitto.org/man/mosquitto-8.html).
 
-If you choose not to use the MQTT integration, simply leave the config value for MQTT_Server blank and the integration will be disabled.
+To disable MQTT, leave `MQTT_Server` blank.
 
-### a.) you use Home Assistant's [MQTT Discovery functionality](https://www.home-assistant.io/docs/mqtt/discovery/).
+### Option A: Home Assistant MQTT Discovery (Recommended)
 
-To do so, add the following line to `svenson-mqtt-bridge.conf`
+Add to `svenson-mqtt-bridge.conf`:
 
-```
+```ini
 EnableDiscovery = true
 ```
 
-and also add the following line to your `configuration.yaml` in Home Assistant:
+Add to your Home Assistant `configuration.yaml`:
 
-```
+```yaml
 mqtt:
   discovery: true
 ```
-   
-Note that both the svenson-mqtt-bridge & Home Assistant need to be restarted before this will work. Home Assistant will henceforth auto discover your bed.
 
-### b.) Don't use Home Assistants MQTT Discovery functionality.
+Restart both the bridge and Home Assistant. Your bed will be auto-discovered.
 
-If so, no further changes are required to `svenson-mqtt-bridge.conf`. However you will have to add lines to `configuration.yaml` in Home Assistant for every functionality of your bed you wish to use.
-Finally, in case of any difficulties with this integration, 2 more useful commands:
+### Option B: Manual Entity Configuration
 
-### a.) See messages on the MQTT Broker
-If you want to see what messages are passed on the MQTT Broker, you can use the following to listen to all messages (assuming you set up mosquitto with a username and password):
+If you prefer not to use discovery, no changes are needed in `svenson-mqtt-bridge.conf`. Instead, manually add entities to `configuration.yaml` for each bed function you want to expose.
 
-```
-mosquitto_sub -h 192.168.x.x -p 1883 -u [username]-P [password] -t '#' -v
-```
+### Debugging MQTT
 
-### b.) Send messages to the MQTT Broker, for the svenson-mqtt-bridge to pick up
-If you want to post a message to the MQTT Broker for your svenson-mqtt-bridge to pick up, you can use following to send messages (assuming you set up mosquitto with a username and password):
+**Listen to all messages** on the broker:
 
-```
-mosquitto_pub -h 192.168.x.x -p 1883 -u [username]-P [password] -t 'home/svenson/select/command/MyBed_preset' -m 'M2'
-mosquitto_pub -h 192.168.x.x -p 1883 -u [username]-P [password] -t 'home/svenson/select/command/MyBed_preset' -m 'Flat'
+```sh
+mosquitto_sub -h 192.168.x.x -p 1883 -u [username] -P [password] -t '#' -v
 ```
 
-Those 2 command will rise and lower your bed. Note that the section **MyBed** will be adjusted if you choose a different name for your bed in svenson-mqtt-bridge.conf under the section "name".
+**Send a command** to the bed:
 
-Finally, you can set up Home Assistant's Lovelace GUI to control your bed from there. Obviously you have many options, I chose a pretty basic layout:
-
-![LoveLace GUI](documentation/homeassistant.png)
-
-To set this up, use the following configuration text in your Lovelace Raw Configuration Editor.
-```
- - type: entities
-        entities:
-          - entity: select.my_bed_preset_positions
-          - entity: number.my_bed_tilt_level
-          - entity: number.my_bed_head_level
-          - entity: number.my_bed_feet_level
-          - entity: switch.my_bed_light
-          - entity: switch.my_bed_massage
-          - entity: select.my_bed_massage_head
-          - entity: select.my_bed_massage_feet
-        title: My Bed
-        state_color: true
-        show_header_toggle: false
+```sh
+mosquitto_pub -h 192.168.x.x -p 1883 -u [username] -P [password] -t 'home/svenson/select/command/MyBed_preset' -m 'M2'
+mosquitto_pub -h 192.168.x.x -p 1883 -u [username] -P [password] -t 'home/svenson/select/command/MyBed_preset' -m 'Flat'
 ```
 
-Note again that the term **my_bed** will be adjusted if you choose a different name for your bed in svenson-mqtt-bridge.conf under the section "name".
+Note that **MyBed** is replaced by the name you set in `svenson-mqtt-bridge.conf` under `name`.
 
-## 7 Additional Information
-The Sync port is obviously made to connect 2 beds (likely a Split King) to ensure that the beds move in sync. However, this is not documented in the manual, and repeated calls to the vendor to sell me a split cable went unanswered. So if you are just interested in a sync cable, you can make this yourself using cheap RJ12 P6C6 connectors  [Order](https://www.ebay.com/itm/393536559928?epid=1707509278&hash=item5ba09b5b38:g:su0AAOSwlRNhKXGU) and a 6 Conductor Flat Modular Line Cord [Order](https://www.showmecables.com/89-350-193-bk?gclid=CjwKCAjw2vOLBhBPEiwAjEeK9solxEAq65zqyEKRCsE6wkvLs0uS2bMHigPTeO7wp67jKc09wo9gYxoC-gsQAvD_BwE). I find it easier & cheaper to order a normal Telephone Line Cable [Order](https://www.ebay.com/itm/400973901474?epid=1839933136&hash=item5d5be82ea2:g:7y4AAOSwDNdVxQAs)  and to replace one end of the connector. Note that the wiring needs to match the below for the sync cable to work:
+### Home Assistant Lovelace Example
+
+![Lovelace GUI](documentation/homeassistant.png)
+
+Add this to your Lovelace raw configuration:
+
+```yaml
+- type: entities
+  entities:
+    - entity: select.my_bed_preset_positions
+    - entity: number.my_bed_tilt_level
+    - entity: number.my_bed_head_level
+    - entity: number.my_bed_feet_level
+    - entity: switch.my_bed_light
+    - entity: switch.my_bed_massage
+    - entity: select.my_bed_massage_head
+    - entity: select.my_bed_massage_feet
+  title: My Bed
+  state_color: true
+  show_header_toggle: false
+```
+
+Replace `my_bed` with your configured bed name.
+
+## Sync Cable (Optional)
+
+The "Sync Cable" port is designed to connect two beds (e.g., a split king) so they move in unison. This is not needed for this automation project, but if you want to build a sync cable yourself:
+
+Use RJ12 6P6C connectors ([example](https://www.ebay.com/itm/393536559928)) with a 6-conductor flat modular cord ([example](https://www.showmecables.com/89-350-193-bk)). Alternatively, buy a standard telephone line cable ([example](https://www.ebay.com/itm/400973901474)) and replace one connector. The wiring must match:
 
 ![Sync Cable](documentation/Sync%20Cable.png)
 
-But again, you do not need such a sync cable for this automation. This is just if you are looking to sync 2 beds without automation.
 
+## License
 
-## 8 License
-![Image of the license](https://i.creativecommons.org/l/by-nc-sa/4.0/88x31.png)
+![CC BY-NC-SA 4.0](https://i.creativecommons.org/l/by-nc-sa/4.0/88x31.png)
 
 [Attribution-NonCommercial-ShareAlike 4.0 International (CC BY-NC-SA 4.0)](https://creativecommons.org/licenses/by-nc-sa/4.0/)
 

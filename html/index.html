@@ -6,27 +6,86 @@
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>%%NAME%%</title>
-    <link rel="stylesheet" href="bootstrap.min.css">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css" integrity="sha512-iBBXm8fW90+nuLcSKlbmrPcLa0OT92xO1BIsZ+ywDWZCvqsWgccV3gFoRBv0z+8dLJgyAHIhR35VZc2oM/gI1w==" crossorigin="anonymous" />
-    <link href="flipTimer.css" rel="stylesheet">
     <link rel="stylesheet" href="style.css">
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#212529">
     <link rel="icon" sizes="192x192" href="ico_lg.png">    
-    <script src="jquery-3.6.0.min.js"></script>
+    <script src="jquery-4.0.0.min.js"></script>
     <script src="jcanvas.min.js"></script>
-    <script src="bootstrap.bundle.min.js"></script>
-    <script src="jquery.flipTimer.js"></script>
+    <script type="text/javascript">
+        /* ===== Flip Timer (countdown) ===== */
+        (function($) {
+          var digitTpl =
+            '<div class="digit">' +
+            '  <div class="digit-top"><span class="digit-wrap"></span></div>' +
+            '  <div class="shadow-top"></div>' +
+            '  <div class="digit-bottom"><span class="digit-wrap"></span></div>' +
+            '  <div class="shadow-bottom"></div>' +
+            '</div>';
+
+          function buildDigits(el, value, maxFirst) {
+            var arr = String(value).split('');
+            if (arr.length < 2) arr.unshift('0');
+            $(el).empty();
+            arr.forEach(function() { $(el).append('<div class="digit-set"></div>'); });
+            $(el).find('.digit-set').each(function(idx) {
+              var max = (idx === 0) ? maxFirst : 9;
+              for (var i = 0; i <= max; i++) {
+                $(this).append(digitTpl);
+                var d = $(this).find('.digit').last();
+                d.find('.digit-wrap').text(i);
+                if (i == arr[idx]) d.addClass('active');
+                else if (arr[idx] != 0 && i + 1 == arr[idx]) d.addClass('previous');
+                else if (arr[idx] == 0 && i == max) d.addClass('previous');
+              }
+            });
+          }
+
+          function tick(el) {
+            var sets = $(el).find('.digit-set').toArray();
+            (function inc(s) {
+              var cur = $(s).find('.active'), prev = $(s).find('.previous');
+              prev.removeClass('previous');
+              cur.removeClass('active').addClass('previous');
+              if (cur.next().length) { cur.next().addClass('active'); }
+              else {
+                $(s).find('.digit:first-child').addClass('active');
+                var i = sets.indexOf(s);
+                if (i > 0) inc(sets[i - 1]);
+              }
+            })(sets[sets.length - 1]);
+          }
+
+          $.fn.flipTimer = function(opts) {
+            return this.each(function() {
+              var $el = $(this), diff = opts.date - new Date(),
+                  secs = Math.floor(diff/1000) % 60,
+                  mins = Math.floor(diff/60000) % 60,
+                  $m = $el.find('.minutes'), $s = $el.find('.seconds');
+              if ($m.length) buildDigits($m, mins, 5);
+              if ($s.length) buildDigits($s, secs, 5);
+              var iv = setInterval(function() {
+                secs--;
+                if ($s.length) tick($s);
+                if (secs < 0) { secs = 59; mins--; if ($m.length) tick($m); }
+                if (mins < 0 && secs < 0) { clearInterval(iv); if (opts.callback) opts.callback(); }
+              }, 1000);
+            });
+          };
+        })(jQuery);
+    </script>
     <script type="text/javascript"> 
         var pathname = window.location.href.split("/")[0].split("?")[0];
         var baseurl = pathname.concat("cmd/");
-        // var actionName = undefined;
+        var csrfToken = "%%CSRF_TOKEN%%";
         
         function getStatus() {
            $.ajax({
                  url: baseurl.concat("status"),
+                 type: 'POST',
                  dataType: "json", 
-                 timeout: 2000, 
+                 timeout: 2000,
+                 headers: { 'X-CSRF-Token': csrfToken, 'X-Requested-With': 'XMLHttpRequest' },
                  error: function(xhr, ajaxOptions, thrownError) {
                     console.log("Failed to receive AJAX response in time. Ignore and wait for next one: " + xhr.status);
                     if (xhr.status === 401) {
@@ -104,7 +163,8 @@
         function sendMessage(action) {   
            $.ajax({
                  url  :  baseurl.concat(action),
-                 type : 'GET',
+                 type : 'POST',
+                 headers: { 'X-CSRF-Token': csrfToken, 'X-Requested-With': 'XMLHttpRequest' },
                  beforeSend: function() {
                  },
                  error: function(xhr, ajaxOptions, thrownError) {
@@ -137,22 +197,22 @@
 
            $("#resetAll").on("click", function(){
                console.log("COINFIRMATION DIALOG")
-               $("#resetConfirm").modal('show');
+               $("#resetConfirm, .modal-backdrop").addClass('show');
            });
 
            $("#resetConfirmYes").on("click", function(){
-               $("#resetConfirm").modal('hide');
+               $("#resetConfirm, .modal-backdrop").removeClass('show');
                var secs = 505
                var t = new Date();
                t.setSeconds(t.getSeconds() + secs);
-               $('#resetModal').modal("show");
+               $('#resetModal, .modal-backdrop').addClass("show");
                sendMessage("reset");
                $('.flipTimer').flipTimer({ direction: 'down', date: t});
-               setTimeout(() => {  $('#resetModal').modal("hide"); }, secs*1000);
+               setTimeout(() => { $('#resetModal, .modal-backdrop').removeClass("show"); }, secs*1000);
            });
   
            $("#resetConfirmNo,#resetConfirmClose").on("click", function(){
-              $("#resetConfirm").modal('hide');
+              $("#resetConfirm, .modal-backdrop").removeClass('show');
            });
 
            $("#closeBrowser").on("click", function(){
@@ -164,21 +224,32 @@
                   .then(reg => console.log("Service Worker registered", reg))
                   .catch(err => console.error("Service Worker registration failed", err));
            }
+
+        // Dropdown toggle
+        $("#settingsDropdown").on("click", function(e) {
+            e.stopPropagation();
+            var $menu = $(".dropdown-menu");
+            var isOpen = $menu.hasClass("show");
+            $menu.toggleClass("show");
+            if (!isOpen) {
+                getStatus();
+                statusTimer = setInterval(getStatus, 1000);
+            } else {
+                clearInterval(statusTimer);
+                $("#currentPosition").clearCanvas();
+            }
+        });
+
+        $(document).on("click", function(e) {
+            var $menu = $(".dropdown-menu");
+            if ($menu.hasClass("show") && !$(e.target).closest(".dropdown-menu").length) {
+                $menu.removeClass("show");
+                clearInterval(statusTimer);
+                $("#currentPosition").clearCanvas();
+            }
+        });
+
         }); 
-         
-        $("html").on('show.bs.dropdown', function (e) {
-            getStatus()
-            statusTimer = setInterval(getStatus, 1000);
-         
-            var $myCanvas = $("#currentPosition");
-            
-        });
-        
-        $("html").on('hide.bs.dropdown', function () {
-            clearInterval(statusTimer)
-            var $myCanvas = $("#currentPosition")
-            $myCanvas.clearCanvas()
-        });
         
         $(document).ready(function() {
             getStatus();  // Call once immediately on load to see if authentication is still good!
@@ -187,14 +258,45 @@
 </script>    
 </head>
 
-<body class="bg-dark">
+<body>
+<!-- SVG icon sprite -->
+<svg xmlns="http://www.w3.org/2000/svg" style="display:none">
+  <symbol id="icon-foot" viewBox="0 -960 3713 1027">
+    <g transform="scale(1,-1)"><path d="M2859 631H3692Q3700 631 3706.5 620.5Q3713 610 3713 594V385Q3713 369 3706.5 358.5Q3700 348 3692 348H2859Q2850 348 2844.0 358.5Q2838 369 2838 385V594Q2838 610 2844.0 620.5Q2850 631 2859 631ZM57 220H2308Q2331 220 2347.5 209.5Q2364 199 2364 183V-26Q2364 -42 2347.5 -52.5Q2331 -63 2308 -63H57Q33 -63 16.5 -52.5Q0 -42 0 -26V183Q0 199 16.5 209.5Q33 220 57 220ZM2175 167 2861 636Q2868 640 2879.0 634.5Q2890 629 2899 617L3017 444Q3026 431 3027.0 418.5Q3028 406 3021 401L2335 -67Q2327 -72 2316.0 -66.5Q2305 -61 2296 -48L2178 125Q2170 137 2169.0 149.5Q2168 162 2175 167ZM739 612Q739 540 711 477Q684 413 636.5 366.0Q589 319 526 291Q463 264 391 264Q319 264 255 291Q192 319 144.5 366.0Q97 413 70 477Q43 540 43 612Q43 684 70 747Q97 811 144.5 858.0Q192 905 255 933Q319 960 391 960Q463 960 526 933Q589 905 636.5 858.0Q684 811 711 747Q739 684 739 612Z"/></g>
+  </symbol>
+  <symbol id="icon-footmassage" viewBox="0 -960 895 1024">
+    <g transform="scale(1,-1)"><path d="M689 881H890Q892 881 893.5 878.5Q895 876 895 872V821Q895 818 893.5 815.0Q892 812 890 812H689Q687 812 685.5 815.0Q684 818 684 821V872Q684 876 685.5 878.5Q687 881 689 881ZM14 782H556Q562 782 566.0 779.0Q570 776 570 773V722Q570 719 566.0 716.0Q562 713 556 713H14Q8 713 4.0 716.0Q0 719 0 722V773Q0 776 4.0 779.0Q8 782 14 782ZM524 769 690 882Q692 883 694.5 881.5Q697 880 699 877L727 836Q730 833 730.0 830.0Q730 827 728 825L563 712Q561 711 558.5 712.5Q556 714 554 717L525 759Q523 762 523.0 765.0Q523 768 524 769ZM178 876Q178 841 153.5 816.5Q129 792 94 792Q59 792 34.5 816.5Q10 841 10 876Q10 911 34.5 935.5Q59 960 94 960Q129 960 153.5 935.5Q178 911 178 876ZM560 649 516 602Q529 582 554.5 555.0Q580 528 605 472Q622 432 632.5 386.5Q643 341 643 292Q643 218 616.0 143.0Q589 68 542 14Q534 3 528.5 -1.5Q523 -6 517 -16L561 -64Q583 -54 618.0 0.0Q653 54 666 85Q693 144 704 209Q714 274 708.5 339.0Q703 404 681 466Q660 527 621 580Q612 594 592.0 619.0Q572 644 560 649ZM461 545Q451 539 435.0 524.0Q419 509 413 498Q420 485 458.5 437.0Q497 389 497 292Q497 196 458.0 147.5Q419 99 413 87Q419 76 435.0 61.0Q451 46 461 40Q486 71 498.5 84.0Q511 97 533 145Q552 186 560 232Q567 278 563.0 324.0Q559 370 544 414Q529 458 503 495Q499 501 493.5 508.0Q488 515 484 520Q476 528 471.5 533.0Q467 538 461 545ZM356 442 310 396Q325 374 338.0 351.5Q351 329 351 292Q351 271 344.5 250.0Q338 229 326 212L310 190L355 142Q387 174 404 213Q420 252 420.0 292.5Q420 333 404 372Q388 411 356 442ZM269 314Q249 374 185.5 354.5Q122 335 144 269Q163 213 227.0 230.5Q291 248 269 314Z"/></g>
+  </symbol>
+  <symbol id="icon-head" viewBox="5 -960 2762 1023">
+    <g transform="scale(1,-1)"><path d="M707 151H2716Q2737 151 2752.0 142.5Q2767 134 2767 123V-35Q2767 -47 2752.0 -55.0Q2737 -63 2716 -63H707Q686 -63 671.0 -55.0Q656 -47 656 -35V123Q656 134 671.0 142.5Q686 151 707 151ZM128 581 796 111Q803 106 803.5 95.5Q804 85 797 76L707 -52Q701 -62 691.0 -65.0Q681 -68 674 -63L6 407Q-1 412 -1.5 422.5Q-2 433 5 442L95 570Q102 580 111.5 583.0Q121 586 128 581ZM738 697Q738 643 717 595Q696 547 660.5 511.5Q625 476 577 455Q529 434 475 434Q420 434 372 455Q325 476 289.0 511.5Q253 547 233 595Q212 643 212 697Q212 752 233 800Q253 847 289.0 883.0Q325 919 372 939Q420 960 475 960Q529 960 577 939Q625 919 660.5 883.0Q696 847 717 800Q738 752 738 697Z"/></g>
+  </symbol>
+  <symbol id="icon-headmassage" viewBox="1 -960 824 1024">
+    <g transform="scale(1,-1)"><path d="M211 719H810Q817 719 821.0 716.5Q825 714 825 711V663Q825 659 821.0 657.0Q817 655 810 655H211Q205 655 200.5 657.0Q196 659 196 663V711Q196 714 200.5 716.5Q205 719 211 719ZM38 847 238 707Q240 705 240.0 702.0Q240 699 238 696L211 658Q209 655 206.0 654.0Q203 653 201 655L2 795Q0 797 -0.5 800.0Q-1 803 1 805L28 844Q30 847 33.0 847.5Q36 848 38 847ZM220 881Q220 849 197.0 826.0Q174 803 141 803Q109 803 86.0 826.0Q63 849 63 881Q63 914 86.0 937.0Q109 960 141 960Q174 960 197.0 937.0Q220 914 220 881ZM573 593 533 550Q544 532 568.0 507.0Q592 482 614 430Q630 393 640.0 351.0Q650 309 650 265Q650 196 625.0 127.0Q600 58 557 8Q549 -2 544.0 -6.5Q539 -11 533 -20L574 -64Q594 -55 626.5 -5.0Q659 45 671 73Q696 128 705 188Q715 248 710.0 307.5Q705 367 685 424Q665 481 630 530Q621 543 602.5 566.0Q584 589 573 593ZM482 497Q473 492 458.0 478.0Q443 464 438 455Q444 442 479.5 398.0Q515 354 515 265Q515 175 479.0 130.5Q443 86 438 75Q443 65 458.0 51.0Q473 37 482 31Q505 60 516.5 72.0Q528 84 548 128Q566 166 573 209Q580 251 576.0 293.5Q572 336 558 376Q544 417 520 451Q516 457 511.5 463.5Q507 470 503 475Q496 482 491.5 486.5Q487 491 482 497ZM384 402 343 360Q356 340 368.0 319.0Q380 298 380 265Q380 244 374.0 225.0Q368 206 357 190L343 170L384 126Q414 155 429 191Q444 227 444.0 264.5Q444 302 429 338Q414 374 384 402ZM304 285Q286 340 227.5 321.5Q169 303 190 242Q207 191 266.0 207.5Q325 224 304 285Z"/></g>
+  </symbol>
+  <symbol id="icon-light" viewBox="0 -960 2590 1025">
+    <g transform="scale(1,-1)"><path d="M0 960H2590V696Q2513 696 2436 696Q2360 696 2283.0 696.0Q2206 696 2129 696Q2053 696 1976 696Q1809 601 1640 552Q1471 504 1301.0 503.5Q1131 503 959 551Q787 599 614 696H0ZM1230 449H1360V-65H1230ZM1455 456 1584 469 1633 -43 1503 -55 1455 456ZM1655 483 1780 521 1929 29 1804 -9ZM1136 457 1006 470 958 -42 1087 -54 1136 457ZM935 484 810 522 662 30 786 -8 935 484Z"/></g>
+  </symbol>
+  <symbol id="icon-massage" viewBox="0 -958 1903 1022">
+    <g transform="scale(1,-1)"><path d="M83 654Q134 686 176 726Q218 766 260.5 792.0Q303 818 351 818Q399 817 462 767Q498 739 497.0 728.5Q496 718 583 664Q621 640 665 628Q709 616 754.5 615.5Q800 615 844 627Q888 639 924 662Q937 672 956.0 685.5Q975 699 985 708Q1008 727 1036 760Q1063 793 1103.0 809.5Q1143 826 1199 811Q1256 796 1337 719Q1368 689 1401 664Q1435 640 1472.5 624.5Q1510 609 1554 606Q1597 602 1649 613Q1689 622 1730 645Q1770 668 1805.5 697.5Q1841 727 1867 760Q1893 792 1903 821Q1855 843 1845.0 862.0Q1835 881 1786 898Q1775 877 1752 848Q1730 819 1698.5 795.0Q1667 771 1627 758Q1588 745 1543 754Q1474 768 1429.0 829.0Q1384 890 1316 923Q1258 954 1199 958Q1140 963 1085.0 947.5Q1030 932 980 900Q931 867 891 823Q832 757 776 755Q721 753 671.5 781.5Q622 810 581 851Q539 892 508 912Q476 933 436 944Q395 956 352.0 958.0Q309 960 266 951Q224 943 189 923Q131 892 88.0 845.0Q45 798 0 769Q36 717 40.5 709.5Q45 702 83 654ZM83 319Q134 352 176 392Q218 432 260.5 458.0Q303 484 351 483Q399 482 462 433Q498 405 497.0 394.5Q496 384 583 329Q621 305 665 293Q709 281 754.5 281.0Q800 281 844 293Q888 305 924 329Q937 337 956.0 350.5Q975 364 985 373Q1008 392 1036 425Q1063 458 1103.0 474.5Q1143 491 1199 476Q1256 461 1337 385Q1368 354 1401 330Q1435 305 1472.5 290.0Q1510 275 1554 271Q1597 267 1649 279Q1689 287 1730 310Q1770 333 1805.5 363.0Q1841 393 1867 426Q1893 458 1903 486Q1855 508 1845.0 527.0Q1835 546 1786 563Q1775 543 1752 514Q1730 485 1698.5 461.0Q1667 437 1627 423Q1588 410 1543 419Q1474 434 1429.0 495.0Q1384 556 1316 590Q1258 620 1199 624Q1140 629 1085.0 613.0Q1030 597 980 565Q931 532 891 488Q832 422 776 420Q721 418 671.5 446.5Q622 475 581 516Q539 557 508 577Q476 598 436 610Q395 621 352.0 623.0Q309 625 266 616Q224 608 189 588Q131 557 88.0 510.0Q45 463 0 435Q36 383 40.5 375.0Q45 367 83 319ZM83 -16Q134 17 176 57Q218 98 260.5 124.0Q303 150 351 150Q399 149 462 100Q498 71 497.0 60.0Q496 49 583 -6Q621 -30 665 -42Q709 -54 754.5 -54.0Q800 -54 844 -42Q888 -30 924 -6Q937 3 956.0 17.0Q975 31 985 38Q1008 58 1036 91Q1063 124 1103.0 140.5Q1143 157 1199 142Q1256 127 1337 50Q1368 20 1401 -4Q1435 -29 1472.5 -44.5Q1510 -60 1554 -64Q1597 -68 1649 -56Q1689 -47 1730 -24Q1770 -1 1805.5 28.5Q1841 58 1867 91Q1893 124 1903 152Q1855 173 1845.0 192.0Q1835 211 1786 229Q1775 208 1752 179Q1730 150 1698.5 126.0Q1667 102 1627 88Q1588 75 1543 84Q1474 99 1429.0 160.0Q1384 221 1316 256Q1258 285 1199 289Q1140 294 1085.0 278.5Q1030 263 980 230Q931 198 891 154Q832 87 776 85Q721 84 671.5 112.0Q622 140 581 181Q539 223 508 242Q476 264 436 276Q395 287 352.0 289.0Q309 291 266 282Q224 273 189 254Q131 222 88.0 175.5Q45 129 0 102Q36 48 40.5 40.0Q45 32 83 -16Z"/></g>
+  </symbol>
+  <symbol id="icon-tiltdown" viewBox="0 -960 2758 1023">
+    <g transform="scale(1,-1)"><path d="M872 676Q872 622 851 574Q831 526 795.5 490.5Q760 455 712 435Q664 414 610 414Q556 414 508 435Q460 455 424.5 490.5Q389 526 369 574Q348 622 348 676Q348 730 369 778Q389 826 424.5 861.5Q460 897 508 917Q556 938 610 938Q664 938 712 917Q760 897 795.5 861.5Q831 826 851 778Q872 730 872 676ZM213 932V520L739 150H2730Q2741 150 2749.5 141.5Q2758 133 2758 122V-36Q2758 -47 2749.5 -55.0Q2741 -63 2730 -63H691Q685 -65 679.5 -64.0Q674 -63 669 -59L15 401Q14 402 13.0 402.5Q12 403 12 404Q6 408 3.0 413.5Q0 419 0 426V932Q0 944 8.0 952.0Q16 960 28 960H185Q197 960 205.0 952.0Q213 944 213 932ZM1471 277V928L992 602Z"/></g>
+  </symbol>
+  <symbol id="icon-tiltup" viewBox="0 -960 2757 1023">
+    <g transform="scale(1,-1)"><path d="M871 675Q871 621 851 573Q830 526 794.5 490.5Q759 455 711 434Q664 414 610 414Q555 414 508 434Q460 455 424.5 490.5Q389 526 369 573Q348 621 348 675Q348 729 369 777Q389 825 424.5 860.5Q460 896 508 916Q555 937 610 937Q664 937 711 916Q759 896 794.5 860.5Q830 825 851 777Q871 729 871 675ZM213 932V520L739 150H2729Q2740 150 2748.5 141.5Q2757 133 2757 122V-36Q2757 -47 2748.5 -55.0Q2740 -63 2729 -63H691Q685 -65 679.0 -64.0Q673 -63 668 -59L15 401Q14 401 13.0 402.0Q12 403 12 403Q6 407 3.0 413.0Q0 419 0 426V932Q0 943 8.0 951.0Q16 959 28 959H185Q197 959 205.0 951.0Q213 943 213 932ZM991 309V960L1470 634Z"/></g>
+  </symbol>
+  <symbol id="icon-torch" viewBox="0 -960 396 1024">
+    <g transform="scale(1,-1)"><path d="M190 -64Q217 -64 235.0 -62.0Q253 -60 266 -42Q280 -21 280.0 1.5Q280 24 279 56V494Q279 551 282.5 548.0Q286 545 309 575Q337 612 337.0 661.0Q337 710 337 758Q255 785 200.0 787.5Q145 790 49 758Q49 708 48.5 662.5Q48 617 75 578Q97 547 101.5 551.0Q106 555 106 499V61Q106 28 106.0 5.0Q106 -18 119 -39Q128 -54 146.5 -59.0Q165 -64 190 -64ZM181 830V960H209V830ZM236 830 302 952 327 939 260 817 236 830ZM290 826 382 877 396 853 303 801ZM160 826 93 948 69 935 135 813ZM106 822 13 873 0 849 92 797Z"/></g>
+  </symbol>
+</svg>
+
     <!--container-->
-    <div class="container m-0 p-0 shadow justify-content-between">
+    <div class="container m-0 p-0">
         <div class="d-flex flex-row navbar justify-content-between px-3 py-4 align-items-center">
-            <i class="fas fa-chevron-left" id="closeBrowser"></i>
+            <i class="fa-chevron-left" id="closeBrowser"></i>
             <span>%%NAME%%</span>
-            <i class="fas fa-ellipsis-h" data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="false" style="font-size:1.3em" id="settingsDropdown"></i>
-	    <div style="left: 108px; top: 52px" class="dropdown-menu dropdown-menu-right">
+            <i class="fa-ellipsis-h dropdown-toggle" id="settingsDropdown"></i>
+	    <div class="dropdown-menu">
 	        <div>
 	            <canvas id="currentPosition" width="225" height="110">
 	                <p>This is fallback content for users of assistive technologies or of browsers that don't have full support for the Canvas API.</p>
@@ -211,12 +313,12 @@
 	    </div>
         </div>
 		
-	<div class="d-flex flex-row justify-content-between px-3 justify-content-center align-items-center">
+	<div class="d-flex flex-row justify-content-between px-3 align-items-center">
             <div class="d-flex flex-row p-2 grey-bg buttoneffect press" actionName="M1">
                 <span class="label px-2 py-1"><h5>M1</h5></span>
             </div>
-	    <div class="d-flex flex-row p-2 grey-bg justify-content-center align-items-center">
-                <i class="fas icon-torch px-3 py-1 control-icon" style="font-size:2em"></i>
+	    <div class="d-flex flex-row p-2 grey-bg justify-content-center align-items-center" style="width:60px;height:60px">
+                <svg class="svg-icon" style="width:36px;height:36px"><use href="#icon-torch"/></svg>
             </div>
             <div class="d-flex flex-row p-2 grey-bg justify-content-center align-items-center buttoneffect press" actionName="M2">
                 <span class="label px-2 py-1"><h5>M2</h5></span>
@@ -227,9 +329,9 @@
             <div class="d-flex flex-row py-0 px-3 my-1 grey-bg-square justify-content-center align-items-center w-25 buttoneffect press" actionName="TV">
                 <span class="label p-2"><h6>TV</h6></span>
             </div>
-            <div class="d-flex flex-column flex-row py-2 px-3 my-1 grey-bg-square justify-content-center align-items-center w-25 buttoneffect hold" actionName="tiltUp"> 
-                <i class="fas icon-tiltup control-icon" style="font-size:.8em"></i>
-                <span class="label px-3">TILT</span>
+            <div class="d-flex flex-column flex-row py-0 px-3 my-1 grey-bg-square justify-content-center align-items-center w-25 buttoneffect hold" style="gap:0" actionName="tiltUp"> 
+                <svg class="svg-icon" style="width:30px;height:30px"><use href="#icon-tiltup"/></svg>
+                <span class="label" style="font-weight:bold;line-height:1;margin-top:-4px">TILT</span>
             </div>
             <div class="d-flex flex-row py-0 px-3 my-1 grey-bg-square justify-content-center align-items-center w-25 buttoneffect press" actionName="zeroG">
                 <span class="label p-2"><h6>Zero&nbsp;G</h6></span>
@@ -238,23 +340,23 @@
 		
 	<div class="d-flex flex-row justify-content-between pt-1 px-3" style="height:60px">
             <div class="d-flex flex-row py-0 px-3 my-1 grey-bg-square justify-content-center align-items-center w-25 buttoneffect press" actionName="antiSnore">
-                <span class="label p-2"><h6><center>Anti<br>Snore</center></h6></span>
+                <span class="label p-2" style="line-height:1.1"><h6 style="margin:0"><center>Anti<br>Snore</center></h6></span>
             </div>
-	    <div class="d-flex flex-column flex-row py-2 px-3 my-1 grey-bg-square justify-content-center align-items-center w-25 buttoneffect hold" actionName="tiltDown">
-                <i class="fas icon-tiltdown control-icon" style="font-size:.8em"></i>
-		<span class="label px-3">TILT</span>
+	    <div class="d-flex flex-column flex-row py-0 px-3 my-1 grey-bg-square justify-content-center align-items-center w-25 buttoneffect hold" style="gap:0" actionName="tiltDown">
+                <svg class="svg-icon" style="width:30px;height:30px"><use href="#icon-tiltdown"/></svg>
+		<span class="label" style="font-weight:bold;line-height:1;margin-top:-4px">TILT</span>
             </div>
             <div class="d-flex flex-row py-0 px-3 my-1 grey-bg-square justify-content-center align-items-center w-25 buttoneffect press" actionName="light">
-                <i class="fas icon-light py-3 control-icon" style="font-size:.9em"></i>
+                <svg class="svg-icon" style="width:36px;height:36px"><use href="#icon-light"/></svg>
 	    </div>
         </div>
  
         <div class="d-flex flex-row mt-1 mx-1 justify-content-between px-2">
             <div class="d-flex flex-column rounded-bg py-1 px-2 justify-content-center align-items-center w-25">
-                <i class="fas fa-chevron-up py-3 control-icon buttoneffect hold" actionName="headUp"></i>
-		<i class="fas icon-head fa-3x py-3 control-icon" style="font-size:1em"></i>
-                <span class="label py-2">HEAD</span>
-                <i class="fas fa-chevron-down py-3 control-icon buttoneffect hold" actionName="headDown"></i>
+                <i class="fa-chevron-up py-3 control-icon buttoneffect hold" actionName="headUp"></i>
+		<svg class="svg-icon" style="width:48px;height:48px"><use href="#icon-head"/></svg>
+                <span class="label py-2" style="font-weight:bold">HEAD</span>
+                <i class="fa-chevron-down py-3 control-icon buttoneffect hold" actionName="headDown"></i>
             </div>
             <div class="py-5 d-flex flex-column align-items-center">
                 <div class="d-flex flex-row flat-round justify-content-center align-items-center buttoneffect press" actionName="flat">
@@ -263,37 +365,39 @@
                 
             </div>
             <div class="d-flex flex-column rounded-bg py-1 px-2 justify-content-center align-items-center w-25">
-                <i class="fas fa-chevron-up py-3 control-icon buttoneffect hold" actionName="feetUp"></i>
-		    <i class="fas icon-foot fa-3x py-3 control-icon" style="font-size:.8em"></i>
-                <span class="label py-2">FOOT</span>
-                <i class="fas fa-chevron-down py-3 control-icon buttoneffect hold" actionName="feetDown"></i>
+                <i class="fa-chevron-up py-3 control-icon buttoneffect hold" actionName="feetUp"></i>
+		    <svg class="svg-icon" style="width:48px;height:48px"><use href="#icon-foot"/></svg>
+                <span class="label py-2" style="font-weight:bold">FOOT</span>
+                <i class="fa-chevron-down py-3 control-icon buttoneffect hold" actionName="feetDown"></i>
             </div>
         </div>
 
         <div class="d-flex flex-row mt-1 mx-1 py-2 justify-content-between px-2">
             <div class="d-flex flex-column rounded-bg py-0 px-2 justify-content-center align-items-center w-25 buttoneffect press" actionName="massageHead">
-                <i class="fas icon-headmassage p-3 control-icon" style="font-size:2.5em"></i>
-		<span class="label py-2">HEAD</span>
+                <svg class="svg-icon" style="width:40px;height:40px"><use href="#icon-headmassage"/></svg>
+		<span class="label py-2" style="font-weight:bold">HEAD</span>
             </div>
 		<div class="d-flex flex-column align-items-center py-0 px-2 w-25">
-    		    <div class="d-flex flex-column py-0 px-3 my-1 w-100 justify-content-center justify-content-middle align-items-center grey-bg-square buttoneffect press" actionName="massageMode">
-			<span class="label">MODE</span>
-			<i class="fas icon-massage p-2 control-icon" style="font-size:.8em"></i>
+    		    <div class="d-flex flex-column py-0 px-3 my-1 w-100 justify-content-center align-items-center grey-bg-square buttoneffect press" actionName="massageMode">
+			<span class="label" style="font-weight:bold">MODE</span>
+			<svg class="svg-icon" style="width:28px;height:28px"><use href="#icon-massage"/></svg>
 		    </div>
 				
-                    <div class="d-flex flex-column py-0 px-3 my-1 w-100 justify-content-center justify-content-middle align-items-center grey-bg-square buttoneffect press" actionName="massageOnOff">
-			<span class="label">ON/OFF</span>
-			<i class="fas icon-massage p-2 control-icon" style="font-size:.8em"></i>
+                    <div class="d-flex flex-column py-0 px-3 my-1 w-100 justify-content-center align-items-center grey-bg-square buttoneffect press" actionName="massageOnOff">
+			<span class="label" style="font-weight:bold">ON/OFF</span>
+			<svg class="svg-icon" style="width:28px;height:28px"><use href="#icon-massage"/></svg>
 		    </div>
             </div>
             <div class="d-flex flex-column rounded-bg py-0 px-2 justify-content-center align-items-center w-25 buttoneffect press" actionName="massageFeet"> 
-                <i class="fas icon-footmassage p-3 control-icon" style="font-size:2.5em"></i>
-		<span class="label py-2">FOOT</span>
+                <svg class="svg-icon" style="width:40px;height:40px"><use href="#icon-footmassage"/></svg>
+		<span class="label py-2" style="font-weight:bold">FOOT</span>
             </div>
         </div>
     </div>
     
-<div class="modal fade" id="resetModal" tabindex="-1" style="padding-right: 0px !important; overflow-y: hidden !important;">
+<div class="modal-backdrop"></div>
+
+<div class="modal" id="resetModal">
   <div class="modal-dialog h-100 d-flex flex-row justify-content-center align-items-center">
     <div class="flipTimer">
       <div class="minutes"></div>
@@ -302,13 +406,13 @@
   </div>
 </div>
 
-<div class="modal fade" tabindex="-1" role="dialog" aria-labelledby="mySmallModalLabel" aria-hidden="true" id="resetConfirm">
-  <div class="modal-dialog modal-lg modal-dialog-centered">
+<div class="modal" id="resetConfirm">
+  <div class="modal-dialog">
     <div class="modal-content">
       <div class="modal-header">
-        <h4 class="modal-title" id="myModalLabel">Confirm</h4>
-        <button type="button" class="btn p-0" data-dismiss="modal" aria-label="Close">
-          <span aria-hidden="true" style="font-size:2em" id="resetConfirmClose">&times;</span>
+        <h4 class="modal-title">Confirm</h4>
+        <button type="button" class="btn p-0" id="resetConfirmClose">
+          <span style="font-size:2em; color:#fffeff;">&times;</span>
         </button>
       </div>
       <div class="modal-body">
@@ -327,4 +431,3 @@
 
 </body>
 </html>
-

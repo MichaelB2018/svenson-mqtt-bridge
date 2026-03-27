@@ -21,14 +21,18 @@
 
 
 import re, requests, sys, os, logging, socket, time, uuid
-import json, time, threading, argparse
+import json, threading, argparse
 import paho.mqtt.client as paho
 import difflib
 import pigpio
-import hashlib
+import signal
+import hmac
+import html as html_mod
+import secrets
 
+from shutil import copyfile
 from tendo import singleton
-from flask import Flask, render_template, request, Response, jsonify, json, redirect, make_response, render_template_string, url_for
+from flask import Flask, render_template, request, Response, jsonify, redirect, make_response, render_template_string, url_for
 from flask.logging import default_handler
 from logging.handlers import RotatingFileHandler
 from functools import wraps
@@ -55,6 +59,9 @@ curr_name = os.path.basename(__file__)
 uartLock = threading.Lock()
 lightTimer = threading.Timer(300, None)
 server_public_ip = None
+server_public_ip_last_check = 0
+auth_sessions = {}  # token -> {"expires": timestamp, "csrf": csrf_token}
+login_attempts = {}  # ip -> {"count": int, "lockout_until": timestamp}
 
 # webapp = Flask(import_name="WebServer", static_url_path="", static_folder=curr_path+'/html')
 webapp = Flask(
@@ -121,7 +128,7 @@ def LoadConfig(conf_file):
         logger.critical("Error in LoadConfig: " + str(e1))
         return False
 
-    parameters = {'DebugLevel': str, 'name': str, 'baudrate': int, 'RX': int, 'TX': int, 'CTS': int, 'RTS': int, 'MQTT_Server': str, 'MQTT_Port': int, 'MQTT_User': str, 'MQTT_Password': str, 'EnableDiscovery': bool, 'max_head': int, 'max_feet': int, 'max_tilt': int, 'max_lumbar': int, 'HttpLocalOnly': bool, 'Password': str, 'BypassAuthForOwnNetwork': bool, 'UseHttps': bool, 'HTTPPort': int, 'HTTPSPort': int, 'positionM1': str, 'positionM2': str, 'positionTV': str, 'positionZeroG': str, 'positionAntiSnore': str, 'defaultM1': str, 'defaultM2': str, 'defaultTV': str, 'defaultZeroG': str, 'defaultAntiSnore': str}
+    parameters = {'DebugLevel': str, 'name': str, 'baudrate': int, 'RX': int, 'TX': int, 'CTS': int, 'RTS': int, 'MQTT_Server': str, 'MQTT_Port': int, 'MQTT_User': str, 'MQTT_Password': str, 'EnableDiscovery': bool, 'WebURL': str, 'max_head': int, 'max_feet': int, 'max_tilt': int, 'max_lumbar': int, 'HttpLocalOnly': bool, 'Password': str, 'BypassAuthForOwnNetwork': bool, 'UseHttps': bool, 'HTTPPort': int, 'HTTPSPort': int, 'positionM1': str, 'positionM2': str, 'positionTV': str, 'positionZeroG': str, 'positionAntiSnore': str, 'defaultM1': str, 'defaultM2': str, 'defaultTV': str, 'defaultZeroG': str, 'defaultAntiSnore': str}
 
     for key, type in parameters.items():
         try:
@@ -534,7 +541,7 @@ def receiveMessageFromSvenson():
                       # Found good message
                       garbage_msg = received_msg[:(i-1)]
                       readHex = " ".join(["{:02x}".format(x) for x in garbage_msg])
-                      logger.warning("Discard partial message: "+garbage_msg)
+                      logger.warning("Discard partial message: "+readHex)
                       received_msg = received_msg[i:]
                       foundMessage = True
                       lt = lt - i
@@ -556,70 +563,83 @@ def receiveMessageFromSvenson():
 
 def sendRawMQTT(topic, msg):
     logger.info("PUBLISHING to MQTT: " + topic + " = " + msg)
-    t.publish(topic,msg,retain=True)
+    t.publish(topic, msg, retain=True)
 
-def sendMQTT(dev_id, device_type, status):
-    if (device_type == "switch"):
-       logger.info("PUBLISHING to MQTT: home/svenson/switch/state/" + str(dev_id) + " = " + ("ON" if (status == 1) else "OFF"))
-       t.publish("home/svenson/switch/state/"+str(dev_id), ("ON" if (status == 1) else "OFF"), retain=True)
-    elif (device_type == "number"):
-       logger.info("PUBLISHING to MQTT: home/svenson/number/state/" + str(dev_id) + " = " + str(status))
-       t.publish("home/svenson/number/state/"+str(dev_id),str(status),retain=True)
-    elif (device_type == "select"):
-       logger.info("PUBLISHING to MQTT: home/svenson/select/state/" + str(dev_id) + " = " + str(status))
-       t.publish("home/svenson/select/state/"+str(dev_id),str(status),retain=True)
-    else:
-       logger.critical("Exception Occurred in sendMQTT with device type: " + device_type)
+def get_device_id():
+    return ''.join(filter(str.isalnum, config["name"]))
+
+def get_web_url():
+    if config.get("WebURL", "").strip():
+        return config["WebURL"].strip()
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect((config["MQTT_Server"], 1))
+        local_ip = s.getsockname()[0]
+        s.close()
+        scheme = "https" if config.get("UseHttps") else "http"
+        port = config.get("HTTPSPort", 443) if config.get("UseHttps") else config.get("HTTPPort", 80)
+        if (scheme == "http" and port == 80) or (scheme == "https" and port == 443):
+            return "{}://{}".format(scheme, local_ip)
+        return "{}://{}:{}".format(scheme, local_ip, port)
+    except Exception:
+        return None
+
+def sendMQTT(entity, value):
+    device_id = get_device_id()
+    topic = "svenson/{}/{}/state".format(device_id, entity)
+    logger.info("PUBLISHING to MQTT: " + topic + " = " + str(value))
+    t.publish(topic, str(value), retain=True)
 
 def updateMQTT():
     global svensonState
     global mqttState
     global config
-    device_id = ''.join(filter(str.isalnum, config["name"]))
-
 
     if config["MQTT_Server"] and config["MQTT_Server"].strip():
         for key in mqttState.keys():
-           if (mqttState[key] != svensonState[key]):
-               if (key in ["head", "feet", "tilt", "lumbar"]):
-                   sendMQTT(device_id+"_"+key, "number", getStatus()[key+"Percent"])
-               elif (key == "light"):
-                   sendMQTT(device_id+"_light", "switch", svensonState["light"])
-               elif (key == "massageOnOff"):
-                   sendMQTT(device_id+"_massage", "switch", svensonState["massageOnOff"])
-               elif (key in ["massageHead", "massageFeet"]):
-                   sendMQTT(device_id+"_"+key, "select", "Level "+str(svensonState[key]))
-               mqttState[key] = svensonState[key]
+            if mqttState[key] != svensonState[key]:
+                if key in ["head", "feet", "tilt", "lumbar"]:
+                    sendMQTT(key, getStatus()[key + "Percent"])
+                elif key == "light":
+                    sendMQTT("light", "ON" if svensonState["light"] else "OFF")
+                elif key == "massageOnOff":
+                    sendMQTT("massage", "ON" if svensonState["massageOnOff"] else "OFF")
+                elif key in ["massageHead", "massageFeet"]:
+                    sendMQTT(key, "Level " + str(svensonState[key]))
+                mqttState[key] = svensonState[key]
 
 def sendStartupInfo():
-    global config 
+    global config
     global svensonState
-    device_id = ''.join(filter(str.isalnum, config["name"]))
+    device_id = get_device_id()
 
     if config["EnableDiscovery"]:
         logger.info("Sending Discovery Information....")
         sendStartupState()
-        logger.info("Waiting 10 seconds to allow Home Assistant to catch up, otehrwise the availability messages will be ignored")
+        logger.info("Waiting 10 seconds to allow Home Assistant to catch up")
         time.sleep(10)
 
+    # Publish availability
+    sendRawMQTT("svenson/{}/availability".format(device_id), "online")
+
     logger.info("Sending Initial Status Messages...")
-    sendMQTT(device_id+"_light", "switch", svensonState["light"])
-    sendMQTT(device_id+"_massage", "switch", svensonState["massageOnOff"])
-    sendMQTT(device_id+"_head", "number", getStatus()["headPercent"])
-    sendMQTT(device_id+"_feet", "number", getStatus()["feetPercent"])
-    sendMQTT(device_id+"_tilt", "number", getStatus()["tiltPercent"])
-    sendMQTT(device_id+"_lumbar", "number", getStatus()["lumbarPercent"])
-    sendMQTT(device_id+"_preset", "select", "Select Preset Positions")
-    sendMQTT(device_id+"_massageHead", "select", "Level "+str(svensonState["massageHead"]))
-    sendMQTT(device_id+"_massageFeet", "select", "Level "+str(svensonState["massageFeet"]))
+    sendMQTT("light", "ON" if svensonState["light"] else "OFF")
+    sendMQTT("massage", "ON" if svensonState["massageOnOff"] else "OFF")
+    sendMQTT("head", getStatus()["headPercent"])
+    sendMQTT("feet", getStatus()["feetPercent"])
+    sendMQTT("tilt", getStatus()["tiltPercent"])
+    sendMQTT("lumbar", getStatus()["lumbarPercent"])
+    sendMQTT("preset", "Select Preset Positions")
+    sendMQTT("massageHead", "Level " + str(svensonState["massageHead"]))
+    sendMQTT("massageFeet", "Level " + str(svensonState["massageFeet"]))
 
 def on_connect(client, userdata, flags, rc):
     global config
+    device_id = get_device_id()
 
-    logger.info("Connected to MQTT with result code "+str(rc))
-    t.subscribe("home/svenson/switch/command/+")
-    t.subscribe("home/svenson/number/command/+")
-    t.subscribe("home/svenson/select/command/+")
+    logger.info("Connected to MQTT with result code " + str(rc))
+    t.subscribe("svenson/{}/+/command".format(device_id))
+    t.subscribe("homeassistant/status")
     restart_thread = threading.Thread(target=sendStartupInfo)
     restart_thread.daemon = True
     restart_thread.start()
@@ -627,99 +647,217 @@ def on_connect(client, userdata, flags, rc):
 
 def receiveMessageFromMQTT(client, userdata, message):
     global config
-    
+
     logger.info("starting receiveMessageFromMQTT")
     try:
         msg = str(message.payload.decode("utf-8"))
         topic = message.topic
-        logger.info("message received from MQTT: "+topic+" = "+msg)
+        logger.info("message received from MQTT: " + topic + " = " + msg)
 
-        type = topic.split("/")[3]
+        # Handle HA birth message
+        if topic == "homeassistant/status" and msg == "online":
+            logger.info("Home Assistant birth message received, re-announcing...")
+            restart_thread = threading.Thread(target=sendStartupInfo)
+            restart_thread.daemon = True
+            restart_thread.start()
+            return
+
+        # Parse topic: svenson/{device_id}/{entity}/command
+        parts = topic.split("/")
         position = 0
-        if type == "command":
-            device_id = ''.join(filter(str.isalnum, config["name"]))
-            rcvd_device_id = topic.split("/")[4].split("_")[0]
-            command = topic.split("/")[4].split("_")[1]
-            if (device_id != rcvd_device_id):
-                pass;  ## Not for me!
-            elif (command == "preset"):
-                command = msg  ## This works correct for M1, M2 & TV
-                if (msg == "Zero G"):
-                  command="zeroG"
-                elif (msg == "Anti Snore"):
-                  command="antiSnore"
-                elif (msg == "Flat"):
-                  command="flat"
-                sendMQTT(device_id+"_preset", "select", "Select Preset Positions")
-            elif (command == "massage"):
+        if len(parts) == 4 and parts[0] == "svenson" and parts[3] == "command":
+            device_id = get_device_id()
+            rcvd_device_id = parts[1]
+            command = parts[2]
+
+            if device_id != rcvd_device_id:
+                pass  # Not for me!
+            elif command == "preset":
+                command = msg  # Works for M1, M2 & TV
+                if msg == "Zero G":
+                    command = "zeroG"
+                elif msg == "Anti Snore":
+                    command = "antiSnore"
+                elif msg == "Flat":
+                    command = "flat"
+                sendMQTT("preset", "Select Preset Positions")
+            elif command == "massage":
                 command = "massageOnOff"
-            elif (command in ["head", "feet", "tilt", "lumbar"]):
-                position = int(10000 + (int(msg)/100*config["max_"+command]))
-                if (position >= svensonState[command]):
-                   command = command+"Up"
+            elif command in ["head", "feet", "tilt", "lumbar"]:
+                position = int(10000 + (int(msg) / 100 * config["max_" + command]))
+                if position >= svensonState[command]:
+                    command = command + "Up"
                 else:
-                   command = command+"Down"
-            elif (command == "massageHead"):
-                if (int(msg.split(" ")[1]) == 0):
+                    command = command + "Down"
+            elif command == "massageHead":
+                if int(msg.split(" ")[1]) == 0:
                     svensonState["massageHead"] = 3
-                elif (int(msg.split(" ")[1]) == 1):
+                elif int(msg.split(" ")[1]) == 1:
                     svensonState["massageHead"] = 0
                 else:
                     svensonState["massageHead"] = 0
                     sendMessageToSvenson("massageHead")
-                    svensonState["massageHead"] = int(msg.split(" ")[1])-1
-            elif (command == "massageFeet"):
-                if (int(msg.split(" ")[1]) == 0):
+                    svensonState["massageHead"] = int(msg.split(" ")[1]) - 1
+            elif command == "massageFeet":
+                if int(msg.split(" ")[1]) == 0:
                     svensonState["massageFeet"] = 3
-                elif (int(msg.split(" ")[1]) == 1):
+                elif int(msg.split(" ")[1]) == 1:
                     svensonState["massageFeet"] = 0
                 else:
                     svensonState["massageFeet"] = 0
                     sendMessageToSvenson("massageFeet")
-                    svensonState["massageFeet"] = int(msg.split(" ")[1])-1
-            
+                    svensonState["massageFeet"] = int(msg.split(" ")[1]) - 1
+
             try:
                 if (device_id == rcvd_device_id) and (command in cmdTypes.keys()):
                     logger.info("processing Command \"" + command + "\"")
-                    if (svensonContinuous["active"] == True):
-                        if (svensonContinuous["cmd"] == command):
+                    if svensonContinuous["active"] == True:
+                        if svensonContinuous["cmd"] == command:
                             logger.info("Ignore command as it's still active")
                         else:
-                            logger.info("Stop Previous command: "+svensonContinuous["cmd"])
-                            if (isContinuousOperationInProgress(command)):
+                            logger.info("Stop Previous command: " + svensonContinuous["cmd"])
+                            if isContinuousOperationInProgress(command):
                                 sendMessageToSvenson("cancel")
                             sendMessageToSvenson(command, None if (command not in svensonContinuousCmd) else position)
                     else:
                         sendMessageToSvenson(command, None if (command not in svensonContinuousCmd) else position)
-                elif (command == "Select Preset Positions"):
-                   pass
+                elif command == "Select Preset Positions":
+                    pass
                 else:
-                   logger.warning("RECEIVED UNKNOWN COMMAND FROM MQTT: " + command + ". Ignoring tis command")
+                    logger.warning("RECEIVED UNKNOWN COMMAND FROM MQTT: " + command + ". Ignoring this command")
             except Exception as e1:
                 logger.error("Error in Process MQTT Command: " + command + ": " + str(e1))
 
-
     except Exception as e1:
-        logger.critical("Exception Occured: " + str(e1))
+        logger.critical("Exception Occurred: " + str(e1))
 
     logger.info("finishing receiveMessageFromMQTT")
 
 def sendStartupState():
-    global config 
-    device_id = ''.join(filter(str.isalnum, config["name"]))
+    global config
+    device_id = get_device_id()
+    mac = get_mac_address()
+    web_url = get_web_url()
 
     logger.info("Send Discovery Messages")
-    sendRawMQTT("homeassistant/select/"+device_id+"_preset/config", '{"name": "'+config['name']+' Preset Positions", "unique_id": "SvenSon_select_'+device_id+'", "command_topic": "home/svenson/select/command/'+device_id+'_preset", "state_topic": "home/svenson/select/state/'+device_id+'_preset", "options": ["Select Preset Positions", "Flat", "M1", "M2", "TV", "Zero G", "Anti Snore"], "optimistic": false}')
-    sendRawMQTT("homeassistant/select/"+device_id+"_massageHead/config", '{"name": "'+config['name']+' Massage Head", "unique_id": "SvenSon_select_'+device_id+'_massageHead", "command_topic": "home/svenson/select/command/'+device_id+'_massageHead", "state_topic": "home/svenson/select/state/'+device_id+'_massageHead", "options": ["Level 0", "Level 1", "Level 2", "Level 3"], "icon": "mdi:vibrate"}')
-    sendRawMQTT("homeassistant/select/"+device_id+"_massageFeet/config", '{"name": "'+config['name']+' Massage Feet", "unique_id": "SvenSon_select_'+device_id+'_massageFeet", "command_topic": "home/svenson/select/command/'+device_id+'_massageFeet", "state_topic": "home/svenson/select/state/'+device_id+'_massageFeet", "options": ["Level 0", "Level 1", "Level 2", "Level 3"], "icon": "mdi:vibrate"}')
 
-    sendRawMQTT("homeassistant/switch/"+device_id+"_light/config", '{"name": "'+config['name']+' Light", "unique_id": "SvenSon_switch_'+device_id+'_light", "command_topic": "home/svenson/switch/command/'+device_id+'_light", "state_topic": "home/svenson/switch/state/'+device_id+'_light", "icon": "mdi:lightbulb-on"}')
-    sendRawMQTT("homeassistant/switch/"+device_id+"_massage/config", '{"name": "'+config['name']+' Massage", "unique_id": "SvenSon_switch_'+device_id+'_massage", "command_topic": "home/svenson/switch/command/'+device_id+'_massage", "state_topic": "home/svenson/switch/state/'+device_id+'_massage", "icon": "mdi:vibrate"}')
+    # Build device discovery payload
+    payload = {
+        "dev": {
+            "ids": [mac],
+            "name": config["name"],
+            "mf": "Sven & Son / Richmat",
+            "mdl": "HJC9",
+            "sw": "2.0"
+        },
+        "o": {
+            "name": "svenson-mqtt-bridge",
+            "sw": "2.0"
+        },
+        "avty": {
+            "t": "svenson/{}/availability".format(device_id)
+        },
+        "cmps": {
+            "head": {
+                "p": "number",
+                "name": "Head",
+                "uniq_id": "svenson_{}_head".format(mac),
+                "min": 0,
+                "max": 100,
+                "cmd_t": "svenson/{}/head/command".format(device_id),
+                "stat_t": "svenson/{}/head/state".format(device_id),
+                "ic": "mdi:swap-vertical"
+            },
+            "feet": {
+                "p": "number",
+                "name": "Feet",
+                "uniq_id": "svenson_{}_feet".format(mac),
+                "min": 0,
+                "max": 100,
+                "cmd_t": "svenson/{}/feet/command".format(device_id),
+                "stat_t": "svenson/{}/feet/state".format(device_id),
+                "ic": "mdi:swap-vertical"
+            },
+            "tilt": {
+                "p": "number",
+                "name": "Tilt",
+                "uniq_id": "svenson_{}_tilt".format(mac),
+                "min": 0,
+                "max": 100,
+                "cmd_t": "svenson/{}/tilt/command".format(device_id),
+                "stat_t": "svenson/{}/tilt/state".format(device_id),
+                "ic": "mdi:swap-vertical"
+            },
+            "lumbar": {
+                "p": "number",
+                "name": "Lumbar",
+                "uniq_id": "svenson_{}_lumbar".format(mac),
+                "min": 0,
+                "max": 100,
+                "cmd_t": "svenson/{}/lumbar/command".format(device_id),
+                "stat_t": "svenson/{}/lumbar/state".format(device_id),
+                "ic": "mdi:swap-vertical"
+            },
+            "light": {
+                "p": "switch",
+                "name": "Light",
+                "uniq_id": "svenson_{}_light".format(mac),
+                "cmd_t": "svenson/{}/light/command".format(device_id),
+                "stat_t": "svenson/{}/light/state".format(device_id),
+                "ic": "mdi:lightbulb-on"
+            },
+            "massage": {
+                "p": "switch",
+                "name": "Massage",
+                "uniq_id": "svenson_{}_massage".format(mac),
+                "cmd_t": "svenson/{}/massage/command".format(device_id),
+                "stat_t": "svenson/{}/massage/state".format(device_id),
+                "ic": "mdi:vibrate"
+            },
+            "preset": {
+                "p": "select",
+                "name": "Preset",
+                "uniq_id": "svenson_{}_preset".format(mac),
+                "cmd_t": "svenson/{}/preset/command".format(device_id),
+                "stat_t": "svenson/{}/preset/state".format(device_id),
+                "ops": ["Select Preset Positions", "Flat", "M1", "M2", "TV", "Zero G", "Anti Snore"],
+                "optimistic": False
+            },
+            "massage_head": {
+                "p": "select",
+                "name": "Massage Head",
+                "uniq_id": "svenson_{}_massageHead".format(mac),
+                "cmd_t": "svenson/{}/massageHead/command".format(device_id),
+                "stat_t": "svenson/{}/massageHead/state".format(device_id),
+                "ops": ["Level 0", "Level 1", "Level 2", "Level 3"],
+                "ic": "mdi:vibrate"
+            },
+            "massage_feet": {
+                "p": "select",
+                "name": "Massage Feet",
+                "uniq_id": "svenson_{}_massageFeet".format(mac),
+                "cmd_t": "svenson/{}/massageFeet/command".format(device_id),
+                "stat_t": "svenson/{}/massageFeet/state".format(device_id),
+                "ops": ["Level 0", "Level 1", "Level 2", "Level 3"],
+                "ic": "mdi:vibrate"
+            }
+        }
+    }
 
-    sendRawMQTT("homeassistant/number/"+device_id+"_head/config", '{"name": "'+config['name']+' Head Level", "unique_id": "SvenSon_number_'+device_id+'_head", "min": 0, "max": 100, "command_topic": "home/svenson/number/command/'+device_id+'_head", "state_topic": "home/svenson/number/state/'+device_id+'_head", "icon": "mdi:swap-vertical"}')
-    sendRawMQTT("homeassistant/number/"+device_id+"_feet/config", '{"name": "'+config['name']+' Feet Level", "unique_id": "SvenSon_number_'+device_id+'_feet", "min": 0, "max": 100, "command_topic": "home/svenson/number/command/'+device_id+'_feet", "state_topic": "home/svenson/number/state/'+device_id+'_feet", "icon": "mdi:swap-vertical"}')
-    sendRawMQTT("homeassistant/number/"+device_id+"_tilt/config", '{"name": "'+config['name']+' Tilt Level", "unique_id": "SvenSon_number_'+device_id+'_tilt", "min": 0, "max": 100, "command_topic": "home/svenson/number/command/'+device_id+'_tilt", "state_topic": "home/svenson/number/state/'+device_id+'_tilt", "icon": "mdi:swap-vertical"}')
-    sendRawMQTT("homeassistant/number/"+device_id+"_lumbar/config", '{"name": "'+config['name']+' Lumbar Level", "unique_id": "SvenSon_number_'+device_id+'_lumbar", "min": 0, "max": 100, "command_topic": "home/svenson/number/command/'+device_id+'_lumbar", "state_topic": "home/svenson/number/state/'+device_id+'_lumbar", "icon": "mdi:swap-vertical"}')
+    if web_url:
+        payload["dev"]["cu"] = web_url
+
+    # Publish device discovery
+    sendRawMQTT("homeassistant/device/{}/config".format(device_id), json.dumps(payload))
+
+    # Clean up old per-entity discovery topics
+    old_entities = [
+        "select/{}_preset", "select/{}_massageHead", "select/{}_massageFeet",
+        "switch/{}_light", "switch/{}_massage",
+        "number/{}_head", "number/{}_feet", "number/{}_tilt", "number/{}_lumbar"
+    ]
+    for entity in old_entities:
+        sendRawMQTT("homeassistant/{}/config".format(entity.format(device_id)), "")
 
 
 
@@ -733,6 +871,11 @@ def add_header(r):
     r.headers["Cache-Control"] = "no-cache, no-store, must-revalidate, public, max-age=0"
     r.headers["Pragma"] = "no-cache"
     r.headers["Expires"] = "0"
+    r.headers["X-Content-Type-Options"] = "nosniff"
+    r.headers["X-Frame-Options"] = "DENY"
+    r.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:"
+    if config.get("UseHttps"):
+        r.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
     return r
 
 def processCommand(*args, **kwargs):
@@ -755,14 +898,14 @@ def processCommand(*args, **kwargs):
             else: 
                 sendMessageToSvenson(command)
             result = {};
-            return Response(json.dumps(result), status=200)
+            return Response(json.dumps(result), status=200, content_type='application/json')
         elif (command == "cancelHold"):
             logger.info("processing Command \"" + command + "\"")
 
             if (svensonContinuous["active"] == True):    
                 sendMessageToSvenson("cancel")
             result = {};
-            return Response(json.dumps(result), status=200)
+            return Response(json.dumps(result), status=200, content_type='application/json')
         elif (command == "reset"):
             logger.info("processing Command \"" + command + "\"")
 
@@ -780,19 +923,19 @@ def processCommand(*args, **kwargs):
             sendMessageToSvenson("flat")
             time.sleep(30)
             result = {};
-            return Response(json.dumps(result), status=200)
+            return Response(json.dumps(result), status=200, content_type='application/json')
         elif (command == "status"):
             logger.info("processing Command \"status\"")
             result = getStatus();
-            return Response(json.dumps(result), status=200)
+            return Response(json.dumps(result), status=200, content_type='application/json')
         else:
             logger.warning("UNKNOWN COMMAND " + command)
-            result = {"Error: Unknown Command: " + command}
-            return Response(json.dumps(result), status=400)
+            result = {"error": "Unknown Command: " + command}
+            return Response(json.dumps(result), status=400, content_type='application/json')
     except Exception as e1:
         logger.error("Error in Process Command: " + command + ": " + str(e1))
-        result = {"Error: Exception occured"}
-        return Response(json.dumps(result), status=400)
+        result = {"error": "Exception occurred"}
+        return Response(json.dumps(result), status=400, content_type='application/json')
 
 def generate_adhoc_ssl_context():
     """Generates an adhoc SSL context for the development server."""
@@ -828,8 +971,7 @@ def generate_adhoc_ssl_context():
     os.write(pkey_handle, crypto.dump_privatekey(crypto.FILETYPE_PEM, pkey))
     os.close(cert_handle)
     os.close(pkey_handle)
-    # ctx = ssl.SSLContext(ssl.PROTOCOL_TLS)
-    ctx = ssl.SSLContext(ssl.PROTOCOL_SSLv23)
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS)
     ctx.load_cert_chain(cert_file, pkey_file)
     ctx.verify_mode = ssl.CERT_NONE
     return ctx
@@ -838,36 +980,77 @@ def render_index():
     try:
         with open(os.path.join(curr_path, "html", "index.html"), "r", encoding="utf-8") as f:
             content = f.read()
-            return content.replace("%%NAME%%", config["name"])
+        safe_name = html_mod.escape(config["name"])
+        csrf_token = ""
+        token = request.cookies.get('auth_token')
+        if token and token in auth_sessions:
+            csrf_token = auth_sessions[token]["csrf"]
+        content = content.replace("%%NAME%%", safe_name)
+        content = content.replace("%%CSRF_TOKEN%%", csrf_token)
+        return content
     except Exception as e:
-        return Response(f"Error loading index: {e}", status=500)
+        logger.error(f"Error loading index: {e}")
+        return Response("Internal server error", status=500)
         
+def cleanup_sessions():
+    now = time.time()
+    expired = [k for k, v in auth_sessions.items() if v["expires"] < now]
+    for k in expired:
+        del auth_sessions[k]
+    expired_ips = [ip for ip, v in login_attempts.items() if v["lockout_until"] < now]
+    for ip in expired_ips:
+        del login_attempts[ip]
+
 def require_auth(f):
     @wraps(f)
     def wrapper(*args, **kwargs):
-        global server_public_ip
+        global server_public_ip, server_public_ip_last_check
         remote_ip = request.remote_addr
         logger.info(f"[AUTH] Remote IP: {remote_ip}, Server IP: {server_public_ip}")
 
         # Refresh public IP only if remote IP doesn't match what we believe is our own
         if config["BypassAuthForOwnNetwork"]:
             if remote_ip != server_public_ip:
-                try:
-                    server_public_ip = requests.get("https://ifconfig.me", timeout=2).text.strip()
-                    logger.info(f"[AUTH] Refreshed public IP: {server_public_ip}")
-                except Exception as e:
-                    logger.warning(f"[AUTH] Could not refresh public IP: {e}")
+                now = time.time()
+                if now - server_public_ip_last_check > 300:
+                    server_public_ip_last_check = now
+                    try:
+                        server_public_ip = requests.get("https://ifconfig.me", timeout=2).text.strip()
+                        logger.info(f"[AUTH] Refreshed public IP: {server_public_ip}")
+                    except Exception as e:
+                        logger.warning(f"[AUTH] Could not refresh public IP: {e}")
             
             if remote_ip == server_public_ip:
                 logger.info("[AUTH] Bypassing auth: client IP matches current public IP.")
                 return f(*args, **kwargs)
-                                 
+
+        cleanup_sessions()
         token = request.cookies.get('auth_token')
-        expected = hashlib.sha256(config["Password"].encode('utf-8')).hexdigest()
-        if token != expected:
+        if not token or token not in auth_sessions:
             if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
                 return "Unauthorized", 401
             return redirect(url_for('login', next=request.path))
+        return f(*args, **kwargs)
+    return wrapper
+
+def require_csrf(f):
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        token = request.cookies.get('auth_token')
+        if token and token in auth_sessions:
+            csrf_sent = request.headers.get('X-CSRF-Token', '')
+            csrf_expected = auth_sessions[token]["csrf"]
+            if not hmac.compare_digest(csrf_sent, csrf_expected):
+                logger.warning("[CSRF] Token mismatch")
+                return Response(json.dumps({"error": "CSRF token invalid"}), status=403, content_type='application/json')
+        return f(*args, **kwargs)
+    return wrapper
+
+def require_ajax(f):
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        if request.headers.get('X-Requested-With') != 'XMLHttpRequest':
+            return Response(json.dumps({"error": "Invalid request"}), status=403, content_type='application/json')
         return f(*args, **kwargs)
     return wrapper
 
@@ -875,23 +1058,34 @@ def require_auth(f):
 def login():
     """Display login form and handle password submission."""
     if request.method == 'POST':
-        entered_password = request.form.get('password', '')  # Get password from form submission
-        if entered_password == config["Password"]:
-            # Password correct: create a response redirecting to the originally requested page (or index if none)
-            redirect_target = request.args.get('next') or url_for('index')  # 'next' parameter for post-login redirect
+        remote_ip = request.remote_addr
+        now = time.time()
+        if remote_ip in login_attempts and login_attempts[remote_ip]["lockout_until"] > now:
+            error = "Too many attempts. Please wait 60 seconds."
+            return render_template('login.html', error=error), 429
+        entered_password = request.form.get('password', '')
+        if hmac.compare_digest(entered_password, config["Password"]):
+            login_attempts.pop(remote_ip, None)
+            redirect_target = request.args.get('next', '')
+            if not redirect_target or not redirect_target.startswith('/') or redirect_target.startswith('//'):
+                redirect_target = url_for('index')
             resp = make_response(redirect(redirect_target))
-            # Generate a secure token (hash of the password) to store in cookie
-            token = hashlib.sha256(config["Password"].encode('utf-8')).hexdigest()
-            # Set auth cookie with secure flags (HTTPOnly, Secure, SameSite=Lax)
-            resp.set_cookie('auth_token', token, httponly=True, secure=True, samesite='Lax')
+            token = secrets.token_hex(32)
+            csrf_token = secrets.token_hex(32)
+            auth_sessions[token] = {"expires": time.time() + 86400, "csrf": csrf_token}
+            cleanup_sessions()
+            resp.set_cookie('auth_token', token, httponly=True, secure=True, samesite='Strict', max_age=86400)
             return resp
         else:
-            # Password incorrect: prepare an error message
+            attempts = login_attempts.get(remote_ip, {"count": 0, "lockout_until": 0})
+            attempts["count"] += 1
+            if attempts["count"] >= 5:
+                attempts["lockout_until"] = now + 60
+                attempts["count"] = 0
+            login_attempts[remote_ip] = attempts
             error = "Invalid password, please try again."
-            # (We will re-render the login form below with this error message)
     else:
-        error = None  # No error by default on GET
-    # Render a simple login form (using a template or inline HTML)
+        error = None
     return render_template('login.html', error=error)
 
 ###################################################################
@@ -924,7 +1118,7 @@ if __name__ == '__main__':
        logging.getLogger().setLevel(logging.CRITICAL) # we do not want to see the warning
        me = singleton.SingleInstance() # will sys.exit(-1) if other instance is running
        logging.getLogger().setLevel(tmp)
-    except:
+    except Exception:
        logging.getLogger().setLevel(logging.INFO)
        logger.info("Another instance is already running. quiting...")
        exit()
@@ -934,7 +1128,7 @@ if __name__ == '__main__':
     parser.add_argument('-config', '-c', dest='ConfigFile', default=curr_path+'/svenson-mqtt-bridge.conf', help='Name of the Config File (incl full Path)')
     args = parser.parse_args()
 
-    if args.ConfigFile == None:
+    if args.ConfigFile is None:
         conf_name = curr_name.replace(".py", ".conf")
         conf_file = curr_path+"/"+conf_name
     else:
@@ -995,11 +1189,11 @@ if __name__ == '__main__':
         webapp.add_url_rule('/login', 'login', login, methods=['GET', 'POST'])
         webapp.add_url_rule('/', 'index', require_auth(render_index))
         webapp.add_url_rule('/index.html', 'index_full', require_auth(render_index))       
-        webapp.add_url_rule('/cmd/<command>', 'cmd', require_auth(processCommand), methods=['GET', 'POST'])
+        webapp.add_url_rule('/cmd/<command>', 'cmd', require_ajax(require_csrf(require_auth(processCommand))), methods=['POST'])
     else:
         webapp.add_url_rule('/', 'index', render_index)
         webapp.add_url_rule('/index.html', 'index_full', render_index)       
-        webapp.add_url_rule('/cmd/<command>', 'cmd', processCommand, methods=['GET', 'POST'])
+        webapp.add_url_rule('/cmd/<command>', 'cmd', require_ajax(processCommand), methods=['POST'])
     
         
 
@@ -1029,8 +1223,9 @@ if __name__ == '__main__':
     # And connect to MQTT
     if config["MQTT_Server"] and config["MQTT_Server"].strip():
         logger.info("Connecting to MQ....")
-        t = paho.Client(client_id="svenson-mqtt-bridge_"+get_mac_address())                           #create client object
+        t = paho.Client(client_id="svenson-mqtt-bridge_"+get_mac_address())
         t.username_pw_set(username=config["MQTT_User"],password=config["MQTT_Password"])
+        t.will_set("svenson/{}/availability".format(get_device_id()), "offline", retain=True)
         t.on_connect = on_connect
         t.on_message=receiveMessageFromMQTT
         t.connect(config["MQTT_Server"],config["MQTT_Port"])
@@ -1039,19 +1234,22 @@ if __name__ == '__main__':
         logger.info("Starting Listener Thread to listen to messages from MQTT")
         t.loop_start()
 
+    def shutdown(signum, frame):
+        logger.info("Received signal %s, shutting down..." % signum)
+        if config["MQTT_Server"] and config["MQTT_Server"].strip():
+            sendRawMQTT("svenson/{}/availability".format(get_device_id()), "offline")
+            t.disconnect()
+            t.loop_stop()
+            logger.info("Stop Listener Thread to listen to messages from MQTT")
+        pi.bb_serial_read_close(RX)
+        pi.stop()
+        sys.exit(0)
+
+    signal.signal(signal.SIGTERM, shutdown)
+    signal.signal(signal.SIGINT, shutdown)
+
     while True:
        time.sleep(60)
-      
-    if config["MQTT_Server"] and config["MQTT_Server"].strip():
-        t.loop_stop()
-        logger.info("Stop Listener Thread to listen to messages from MQTT")
-
-    # free resources
-    
-    pi.bb_serial_read_close(RX)
-    pi.stop()
-    
-    sys.exit()
 
     
     
