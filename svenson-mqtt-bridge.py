@@ -1118,7 +1118,7 @@ if __name__ == '__main__':
        logging.getLogger().setLevel(logging.CRITICAL) # we do not want to see the warning
        me = singleton.SingleInstance() # will sys.exit(-1) if other instance is running
        logging.getLogger().setLevel(tmp)
-    except Exception:
+    except (singleton.SingleInstanceException, SystemExit):
        logging.getLogger().setLevel(logging.INFO)
        logger.info("Another instance is already running. quiting...")
        exit()

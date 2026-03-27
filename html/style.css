@@ -288,6 +288,7 @@ div.menu-grid>div>i.active {
 div.rounded-bg {
     background: #0e1015;
     border-radius: 50px;
+    overflow: hidden;
 }
 
 div.flat-round {
@@ -364,13 +365,16 @@ div.buttoneffect:active {
 
 i.buttoneffect:hover {
     color: #cccbd7;
-
-    box-shadow: 0 2px 1px #080b10;
 }
 
 i.buttoneffect:active {
 	transform: scale(1.2);
 	color: #cccbd7;
+}
+
+i.fa-chevron-up.buttoneffect:active,
+i.fa-chevron-down.buttoneffect:active {
+	transform: scaleX(1.8) scale(1.2);
 }
 
 /* ===== Flip Timer ===== */
