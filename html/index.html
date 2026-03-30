@@ -253,6 +253,8 @@
         
         $(document).ready(function() {
             getStatus();  // Call once immediately on load to see if authentication is still good!
+            // Suppress long-press context menu (download/share/print) on touch devices
+            document.addEventListener('contextmenu', function(e) { e.preventDefault(); return false; }, { passive: false });
         });
         
 </script>    

@@ -9,10 +9,24 @@
 /* ===== Reset / Base ===== */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+/* Suppress long-press context menu on touch devices */
+html, body, * {
+    -webkit-touch-callout: none !important;
+}
+
+html {
+    background-color: #212529;
+    height: 100%;
+}
+
 body {
+    -webkit-user-select: none;
+    user-select: none;
+    touch-action: manipulation;
     display: flex;
     justify-content: center;
     align-items: center;
+    min-height: 100%;
     height: 100svh;
     font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", "Noto Sans", "Liberation Sans", Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
     font-size: 1rem;
