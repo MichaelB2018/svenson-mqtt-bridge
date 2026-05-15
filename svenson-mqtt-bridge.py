@@ -633,11 +633,11 @@ def sendStartupInfo():
     sendMQTT("massageHead", "Level " + str(svensonState["massageHead"]))
     sendMQTT("massageFeet", "Level " + str(svensonState["massageFeet"]))
 
-def on_connect(client, userdata, flags, rc):
+def on_connect(client, userdata, connect_flags, reason_code, properties):
     global config
     device_id = get_device_id()
 
-    logger.info("Connected to MQTT with result code " + str(rc))
+    logger.info("Connected to MQTT with result code " + str(reason_code))
     t.subscribe("svenson/{}/+/command".format(device_id))
     t.subscribe("homeassistant/status")
     restart_thread = threading.Thread(target=sendStartupInfo)
@@ -1223,7 +1223,7 @@ if __name__ == '__main__':
     # And connect to MQTT
     if config["MQTT_Server"] and config["MQTT_Server"].strip():
         logger.info("Connecting to MQ....")
-        t = paho.Client(client_id="svenson-mqtt-bridge_"+get_mac_address())
+        t = paho.Client(callback_api_version=paho.CallbackAPIVersion.VERSION2, client_id="svenson-mqtt-bridge_"+get_mac_address())
         t.username_pw_set(username=config["MQTT_User"],password=config["MQTT_Password"])
         t.will_set("svenson/{}/availability".format(get_device_id()), "offline", retain=True)
         t.on_connect = on_connect
